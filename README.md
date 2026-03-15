@@ -33,6 +33,13 @@ Settings are stored at `~/.config/plottrbot/config.json`.
 pytest
 ```
 
+## Full validation procedure
+
+For repeatable software + hardware validation steps, see:
+
+- `docs/testing-suite-procedure.md`
+- `scripts/run_hardware_validation.py`
+
 ## Hardware smoke order
 
 1. Connect to Nano and test `M17`, `M18`, `G1 Z0`, `G1 Z1`, `G28`.
