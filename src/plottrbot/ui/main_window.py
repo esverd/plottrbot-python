@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -29,6 +31,7 @@ from plottrbot.core.models import JobState, RetainedImage
 from plottrbot.core.state_machine import UiState, derive_ui_state
 from plottrbot.serial.nano_transport import NanoTransport
 from plottrbot.serial.program_streamer import ProgramStreamer, SendSessionState, SendStatus
+from plottrbot.system.sleep_inhibitor import SleepInhibitor
 from plottrbot.ui.preview_canvas import PreviewCanvas
 
 
@@ -36,6 +39,14 @@ class UiBridge(QObject):
     log_signal = Signal(str)
     stream_state_signal = Signal(object)
     stream_progress_signal = Signal(int, int)
+    manual_result_signal = Signal(object)
+
+
+@dataclass(slots=True, frozen=True)
+class ManualCommandResult:
+    ok: bool
+    label: str
+    error: str | None = None
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +57,7 @@ class MainWindow(QMainWindow):
         transport: NanoTransport | None = None,
         streamer: ProgramStreamer | None = None,
         converter: BmpConverter | None = None,
+        sleep_inhibitor: SleepInhibitor | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Plottrbot")
@@ -67,8 +79,11 @@ class MainWindow(QMainWindow):
             on_progress=self.bridge.stream_progress_signal.emit,
             on_log=self.bridge.log_signal.emit,
         )
+        self.sleep_inhibitor = sleep_inhibitor or SleepInhibitor(on_log=self.bridge.log_signal.emit)
 
         self._is_drawing = False
+        self._manual_busy = False
+        self._pending_stop_recovery = False
         self.current_ui_state = UiState.BLANK
 
         self._build_ui()
@@ -151,10 +166,12 @@ class MainWindow(QMainWindow):
 
         self.btn_bounding_box = QPushButton("Move in bounding box formation")
         self.btn_pause_drawing = QPushButton("Pause drawing")
+        self.btn_stop_drawing = QPushButton("Stop drawing")
         self.btn_send_img = QPushButton("Send image to robot")
         robot_layout.addLayout(port_row)
         robot_layout.addWidget(self.btn_bounding_box)
         robot_layout.addWidget(self.btn_pause_drawing)
+        robot_layout.addWidget(self.btn_stop_drawing)
         robot_layout.addWidget(self.btn_send_img)
         layout.addWidget(robot_group)
         layout.addStretch(1)
@@ -176,6 +193,9 @@ class MainWindow(QMainWindow):
 
         self.checkbox_bounding_pen = QCheckBox("Use pen when indicating bounding box")
         layout.addWidget(self.checkbox_bounding_pen)
+        self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
+        self.checkbox_stop_recovery.setChecked(True)
+        layout.addWidget(self.checkbox_stop_recovery)
 
         layout.addWidget(QLabel("End GCODE"))
         self.txt_end_gcode = QPlainTextEdit()
@@ -253,6 +273,7 @@ class MainWindow(QMainWindow):
         self.btn_connect.clicked.connect(self._on_connect_toggle)
         self.btn_bounding_box.clicked.connect(self._on_bounding_box)
         self.btn_pause_drawing.clicked.connect(self._on_pause_resume)
+        self.btn_stop_drawing.clicked.connect(self._on_stop_drawing)
         self.btn_send_img.clicked.connect(self._on_send_image)
 
         self.btn_send_cmd.clicked.connect(self._on_send_raw_serial)
@@ -263,17 +284,22 @@ class MainWindow(QMainWindow):
         self.btn_slider_dec.clicked.connect(lambda: self.slider_cmd_count.setValue(self.slider_cmd_count.value() - 1))
         self.btn_slider_inc.clicked.connect(lambda: self.slider_cmd_count.setValue(self.slider_cmd_count.value() + 1))
 
-        self.btn_enable_stepper.clicked.connect(lambda: self._send_manual_command("M17"))
-        self.btn_disable_stepper.clicked.connect(lambda: self._send_manual_command("M18"))
-        self.btn_pen_touch.clicked.connect(lambda: self._send_manual_command("G1 Z0"))
-        self.btn_pen_away.clicked.connect(lambda: self._send_manual_command("G1 Z1"))
-        self.btn_home.clicked.connect(lambda: self._send_manual_command("G28"))
+        self.btn_enable_stepper.clicked.connect(lambda: self._send_manual_commands_async(["M17"], "Enable motors"))
+        self.btn_disable_stepper.clicked.connect(lambda: self._send_manual_commands_async(["M18"], "Disable motors"))
+        self.btn_pen_touch.clicked.connect(
+            lambda: self._send_manual_commands_async(["G1 Z0"], "Set tool to canvas")
+        )
+        self.btn_pen_away.clicked.connect(
+            lambda: self._send_manual_commands_async(["G1 Z1"], "Set away from canvas")
+        )
+        self.btn_home.clicked.connect(lambda: self._send_manual_commands_async(["G28"], "Move to home position"))
         self.btn_update_dpi.clicked.connect(self._on_update_dpi)
         self.btn_save_dims.clicked.connect(self._on_save_dimensions)
 
         self.bridge.log_signal.connect(self._append_log)
         self.bridge.stream_state_signal.connect(self._on_stream_state)
         self.bridge.stream_progress_signal.connect(self._on_stream_progress)
+        self.bridge.manual_result_signal.connect(self._on_manual_command_result)
 
     def _populate_defaults(self) -> None:
         profile = self.settings.machine_profile
@@ -534,23 +560,103 @@ class MainWindow(QMainWindow):
                 self.settings_store.save(self.settings)
         except Exception as exc:
             QMessageBox.warning(self, "USB error", str(exc))
+        self._sync_sleep_inhibitor()
         self._update_ui_state()
 
-    def _send_manual_command(self, command: str) -> bool:
+    def _stream_is_active(self) -> bool:
+        return self.streamer.state.status in {SendStatus.RUNNING, SendStatus.PAUSED}
+
+    def _is_point_within_bounds(self, x_mm: float, y_mm: float, eps: float = 1e-3) -> bool:
+        profile = self.settings.machine_profile
+        return (
+            -eps <= x_mm <= float(profile.canvas_width_mm) + eps
+            and -eps <= y_mm <= float(profile.canvas_height_mm) + eps
+        )
+
+    def _validate_lines_within_bounds(self) -> tuple[bool, str | None]:
+        for line in self.job_state.lines:
+            if not self._is_point_within_bounds(line.x0, line.y0):
+                return (
+                    False,
+                    f"Out-of-bounds line start detected at X{line.x0:.3f} Y{line.y0:.3f}.",
+                )
+            if not self._is_point_within_bounds(line.x1, line.y1):
+                return (
+                    False,
+                    f"Out-of-bounds line end detected at X{line.x1:.3f} Y{line.y1:.3f}.",
+                )
+        return True, None
+
+    def _validate_bbox_within_bounds(self) -> tuple[bool, str | None]:
+        bbox = self.job_state.bounding_box
+        if bbox is None:
+            return False, "No bounding box available."
+        points = [
+            (bbox.min_x, bbox.min_y),
+            (bbox.max_x, bbox.min_y),
+            (bbox.max_x, bbox.max_y),
+            (bbox.min_x, bbox.max_y),
+        ]
+        for x, y in points:
+            if not self._is_point_within_bounds(x, y):
+                return False, f"Bounding box corner is out of machine bounds at X{x:.3f} Y{y:.3f}."
+        return True, None
+
+    def _set_manual_busy(self, is_busy: bool) -> None:
+        self._manual_busy = is_busy
+        self._update_ui_state()
+
+    def _send_manual_commands_async(self, commands: list[str], label: str) -> None:
         if not self.transport.is_connected:
             QMessageBox.information(self, "Not connected", "Connect USB first.")
-            return False
-        ack = self.transport.send_command(command)
-        if not ack.ok:
-            QMessageBox.warning(self, "Serial error", ack.error or "Unknown error")
-            return False
-        return True
+            return
+        if self._manual_busy:
+            QMessageBox.information(self, "Busy", "Another manual command is still running.")
+            return
+        if self._stream_is_active():
+            QMessageBox.information(
+                self,
+                "Busy",
+                "Pause/stop the active stream before sending manual commands.",
+            )
+            return
+
+        self._set_manual_busy(True)
+        worker = threading.Thread(
+            target=self._manual_command_worker,
+            args=(list(commands), label),
+            daemon=True,
+            name="plottrbot-manual-command-worker",
+        )
+        worker.start()
+
+    def _manual_command_worker(self, commands: list[str], label: str) -> None:
+        result = ManualCommandResult(ok=True, label=label, error=None)
+        for command in commands:
+            ack = self.transport.send_command(command)
+            if not ack.ok:
+                result = ManualCommandResult(
+                    ok=False,
+                    label=label,
+                    error=ack.error or f"Failed to send command: {command}",
+                )
+                break
+        self.bridge.manual_result_signal.emit(result)
+
+    def _on_manual_command_result(self, result_obj: object) -> None:
+        if not isinstance(result_obj, ManualCommandResult):
+            return
+        self._set_manual_busy(False)
+        if result_obj.ok:
+            self._append_log(f"{result_obj.label}: done")
+            return
+        QMessageBox.warning(self, "Serial error", result_obj.error or "Unknown error")
 
     def _on_send_raw_serial(self) -> None:
         command = self.txt_serial_cmd.text().strip()
         if not command:
             return
-        self._send_manual_command(command)
+        self._send_manual_commands_async([command], "Manual serial send")
 
     def _on_send_image(self) -> None:
         if not self.transport.is_connected:
@@ -558,6 +664,13 @@ class MainWindow(QMainWindow):
             return
         if not self.job_state.gcode:
             QMessageBox.information(self, "No commands", "Slice the image first.")
+            return
+        if self._manual_busy:
+            QMessageBox.information(self, "Busy", "Wait for current manual command to finish.")
+            return
+        within_bounds, error = self._validate_lines_within_bounds()
+        if not within_bounds:
+            QMessageBox.warning(self, "Bounds check failed", error or "Generated lines are out of bounds.")
             return
 
         start_index = self.job_state.current_send_index
@@ -570,9 +683,11 @@ class MainWindow(QMainWindow):
         self.job_state.paused = False
         self._is_drawing = True
         self.btn_pause_drawing.setText("Pause drawing")
+        self._pending_stop_recovery = False
         self._append_log(
             f"Drawing image. Starting at command {start_index} of {len(self.job_state.gcode)}"
         )
+        self._sync_sleep_inhibitor()
         self._update_ui_state()
 
     def _on_pause_resume(self) -> None:
@@ -588,6 +703,14 @@ class MainWindow(QMainWindow):
             self.streamer.resume()
             self.job_state.paused = False
             self.btn_pause_drawing.setText("Pause drawing")
+        self._sync_sleep_inhibitor()
+
+    def _on_stop_drawing(self) -> None:
+        if not self._stream_is_active():
+            return
+        self._pending_stop_recovery = self.checkbox_stop_recovery.isChecked()
+        self.streamer.stop()
+        self._append_log("Stop requested")
 
     def _on_start_from_command_number(self) -> None:
         if not self.job_state.lines:
@@ -628,6 +751,10 @@ class MainWindow(QMainWindow):
 
         if not self.transport.is_connected:
             return
+        within_bounds, error = self._validate_bbox_within_bounds()
+        if not within_bounds:
+            QMessageBox.warning(self, "Bounds check failed", error or "Bounding box is out of bounds.")
+            return
 
         pen_position = 0 if self.checkbox_bounding_pen.isChecked() else 1
         commands = [
@@ -639,9 +766,7 @@ class MainWindow(QMainWindow):
             "G1 Z1",
             "G28",
         ]
-        for command in commands:
-            if not self._send_manual_command(command):
-                break
+        self._send_manual_commands_async(commands, "Bounding box trace")
 
     def _on_save_dimensions(self) -> None:
         width = self._parse_int(self.txt_robot_width, "Robot width")
@@ -678,6 +803,14 @@ class MainWindow(QMainWindow):
             if state_obj.status == SendStatus.ERROR and state_obj.last_error:
                 QMessageBox.warning(self, "Streaming error", state_obj.last_error)
             self._append_log(f"Commands successfully sent = {state_obj.current_index}")
+            if (
+                self._pending_stop_recovery
+                and self.transport.is_connected
+                and state_obj.status in {SendStatus.STOPPED, SendStatus.ERROR}
+            ):
+                self._pending_stop_recovery = False
+                self._send_manual_commands_async(["G1 Z1", "G28"], "Stop recovery")
+        self._sync_sleep_inhibitor()
         self._update_ui_state()
 
     def _on_stream_progress(self, sent_command_index: int, _total_commands: int) -> None:
@@ -691,6 +824,7 @@ class MainWindow(QMainWindow):
         has_image = self.job_state.loaded_file is not None
         is_sliced = bool(self.job_state.lines)
         usb_connected = self.transport.is_connected
+        stream_active = self._stream_is_active()
         self.current_ui_state = derive_ui_state(
             has_image=has_image,
             is_sliced=is_sliced,
@@ -713,7 +847,7 @@ class MainWindow(QMainWindow):
         self.btn_slider_dec.setEnabled(sliced_controls)
         self.btn_slider_inc.setEnabled(sliced_controls)
 
-        connected_controls = usb_connected
+        connected_controls = usb_connected and not stream_active and not self._manual_busy
         self.txt_serial_cmd.setEnabled(connected_controls)
         self.btn_send_cmd.setEnabled(connected_controls)
         self.btn_enable_stepper.setEnabled(connected_controls)
@@ -723,10 +857,17 @@ class MainWindow(QMainWindow):
         self.btn_home.setEnabled(connected_controls)
 
         can_draw = is_sliced and usb_connected
-        self.btn_bounding_box.setEnabled(can_draw)
-        self.btn_send_img.setEnabled(can_draw)
-        self.btn_pause_drawing.setEnabled(can_draw)
-        self.btn_cmd_start.setEnabled(can_draw)
+        self.btn_bounding_box.setEnabled(can_draw and not stream_active and not self._manual_busy)
+        self.btn_send_img.setEnabled(can_draw and not stream_active and not self._manual_busy)
+        self.btn_pause_drawing.setEnabled(can_draw and stream_active)
+        self.btn_stop_drawing.setEnabled(can_draw and stream_active)
+        self.btn_cmd_start.setEnabled(can_draw and not stream_active and not self._manual_busy)
+
+    def _sync_sleep_inhibitor(self) -> None:
+        if self.transport.is_connected and self.streamer.state.status == SendStatus.RUNNING:
+            self.sleep_inhibitor.start()
+            return
+        self.sleep_inhibitor.stop()
 
     def closeEvent(self, event: object) -> None:  # noqa: N802 (Qt API)
         self.settings.window_width = self.width()
@@ -737,4 +878,5 @@ class MainWindow(QMainWindow):
         self.settings_store.save(self.settings)
         self.streamer.reset()
         self.transport.disconnect()
+        self.sleep_inhibitor.stop()
         super().closeEvent(event)  # type: ignore[arg-type]

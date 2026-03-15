@@ -68,6 +68,26 @@ class NanoTransport:
             write_timeout=2.0,
         )
         self._emit_log(f"Connected: {port} @ {self.profile.baudrate}")
+        self._serial.reset_input_buffer()
+        self._serial.reset_output_buffer()
+        time.sleep(0.25)
+
+        warmup_deadline = time.monotonic() + 0.6
+        while time.monotonic() < warmup_deadline:
+            try:
+                raw = self._serial.readline()
+            except SerialException:
+                break
+            if not raw:
+                continue
+            startup_line = raw.decode("utf-8", errors="ignore").strip()
+            if startup_line:
+                self._emit_log(f"< {startup_line}")
+
+        preflight = self.send_command("G92 H", timeout_seconds=min(8.0, self.profile.ack_timeout_seconds))
+        if not preflight.ok:
+            self.disconnect()
+            raise RuntimeError(f"USB preflight failed: {preflight.error}")
 
     def disconnect(self) -> None:
         if self._serial is None:
@@ -79,7 +99,7 @@ class NanoTransport:
             self._serial = None
             self._emit_log(f"Disconnected: {port}")
 
-    def send_command(self, command: str) -> AckResult:
+    def send_command(self, command: str, *, timeout_seconds: float | None = None) -> AckResult:
         line = command.strip()
         if not line:
             return AckResult(ok=True, response="")
@@ -94,7 +114,8 @@ class NanoTransport:
                 return AckResult(ok=False, error=str(exc))
 
             self._emit_log(f"> {line}")
-            deadline = time.monotonic() + self.profile.ack_timeout_seconds
+            timeout = timeout_seconds if timeout_seconds is not None else self.profile.ack_timeout_seconds
+            deadline = time.monotonic() + timeout
             read_lines: list[str] = []
 
             while time.monotonic() < deadline:

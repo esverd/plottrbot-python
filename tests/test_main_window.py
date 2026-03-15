@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from PIL import Image
+from PySide6.QtWidgets import QMessageBox
 
 from plottrbot.serial.nano_transport import AckResult
 from plottrbot.serial.program_streamer import SendSessionState, SendStatus
@@ -18,9 +20,10 @@ class _Port:
 
 
 class FakeTransport:
-    def __init__(self) -> None:
+    def __init__(self, *, delay_seconds: float = 0.0) -> None:
         self.connected = False
         self.sent: list[str] = []
+        self.delay_seconds = delay_seconds
 
     @property
     def is_connected(self) -> bool:
@@ -36,6 +39,8 @@ class FakeTransport:
         self.connected = False
 
     def send_command(self, command: str) -> AckResult:
+        if self.delay_seconds:
+            time.sleep(self.delay_seconds)
         self.sent.append(command)
         return AckResult(ok=True, response="GO")
 
@@ -48,12 +53,14 @@ class FakeStreamer:
             current_index=0,
             total_commands=0,
         )
+        self.send_calls: list[tuple[list[str], int]] = []
 
     @property
     def state(self) -> SendSessionState:
         return self._state
 
     def send(self, commands: list[str], start_index: int = 0) -> SendSessionState:
+        self.send_calls.append((list(commands), start_index))
         self._state = SendSessionState(
             status=SendStatus.RUNNING,
             start_index=start_index,
@@ -78,6 +85,14 @@ class FakeStreamer:
             total_commands=self._state.total_commands,
         )
 
+    def stop(self) -> None:
+        self._state = SendSessionState(
+            status=SendStatus.STOPPED,
+            start_index=self._state.start_index,
+            current_index=self._state.current_index,
+            total_commands=self._state.total_commands,
+        )
+
     def reset(self) -> None:
         self._state = SendSessionState(
             status=SendStatus.IDLE,
@@ -85,6 +100,25 @@ class FakeStreamer:
             current_index=0,
             total_commands=0,
         )
+
+
+class FakeSleepInhibitor:
+    def __init__(self) -> None:
+        self.started = 0
+        self.stopped = 0
+        self.active = False
+
+    @property
+    def is_active(self) -> bool:
+        return self.active
+
+    def start(self) -> None:
+        self.started += 1
+        self.active = True
+
+    def stop(self) -> None:
+        self.stopped += 1
+        self.active = False
 
 
 def _create_simple_bmp(path: Path) -> None:
@@ -98,7 +132,13 @@ def _create_simple_bmp(path: Path) -> None:
 def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> None:
     transport = FakeTransport()
     streamer = FakeStreamer()
-    window = MainWindow(settings_store=settings_store, transport=transport, streamer=streamer)
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
     qtbot.addWidget(window)
 
     assert window.btn_slice_img.isEnabled() is False
@@ -124,7 +164,13 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
 def test_slider_and_hold_release_behavior(qtbot, settings_store, tmp_path: Path) -> None:
     transport = FakeTransport()
     streamer = FakeStreamer()
-    window = MainWindow(settings_store=settings_store, transport=transport, streamer=streamer)
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
     qtbot.addWidget(window)
 
     bmp_path = tmp_path / "img.bmp"
@@ -150,7 +196,13 @@ def test_pause_resume_keeps_send_index(qtbot, settings_store, tmp_path: Path) ->
     transport = FakeTransport()
     transport.connected = True
     streamer = FakeStreamer()
-    window = MainWindow(settings_store=settings_store, transport=transport, streamer=streamer)
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
     qtbot.addWidget(window)
 
     bmp_path = tmp_path / "img.bmp"
@@ -180,3 +232,105 @@ def test_pause_resume_keeps_send_index(qtbot, settings_store, tmp_path: Path) ->
     window._on_pause_resume()
     assert window.job_state.current_send_index == 4
     assert window.btn_pause_drawing.text() == "Pause drawing"
+
+
+def test_manual_command_async_does_not_block_ui(qtbot, settings_store) -> None:
+    transport = FakeTransport(delay_seconds=0.12)
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    start = time.monotonic()
+    window._send_manual_commands_async(["M17"], "Enable motors")
+    elapsed = time.monotonic() - start
+    assert elapsed < 0.05
+    assert window._manual_busy is True
+
+    qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
+    assert "M17" in transport.sent
+
+
+def test_bounds_validation_blocks_send(qtbot, settings_store, tmp_path: Path, monkeypatch) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    assert window.job_state.lines
+    out_of_bounds_line = window.job_state.lines[0]
+    window.job_state.lines[0] = type(out_of_bounds_line)(
+        x0=-5.0,
+        y0=out_of_bounds_line.y0,
+        x1=out_of_bounds_line.x1,
+        y1=out_of_bounds_line.y1,
+        draw=out_of_bounds_line.draw,
+    )
+
+    warnings: list[str] = []
+
+    def _fake_warning(_parent, _title, text):
+        warnings.append(str(text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", _fake_warning)
+    window._on_send_image()
+
+    assert streamer.send_calls == []
+    assert any("Out-of-bounds" in message for message in warnings)
+
+
+def test_stop_recovery_and_sleep_inhibitor_flow(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+
+    window._on_send_image()
+    assert inhibitor.started >= 1
+    assert window._stream_is_active() is True
+
+    window._on_stop_drawing()
+    assert window._pending_stop_recovery is True
+
+    window._on_stream_state(
+        SendSessionState(
+            status=SendStatus.STOPPED,
+            start_index=0,
+            current_index=5,
+            total_commands=10,
+        )
+    )
+    qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
+    assert "G1 Z1" in transport.sent
+    assert "G28" in transport.sent
+    assert inhibitor.stopped >= 1

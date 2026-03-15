@@ -8,14 +8,26 @@ from plottrbot.serial.nano_transport import NanoTransport
 
 
 class FakeSerial:
-    def __init__(self, *, lines: list[bytes] | None = None, **_: object) -> None:
+    def __init__(
+        self,
+        *,
+        lines: list[bytes] | None = None,
+        responses_per_write: list[list[bytes]] | None = None,
+        **_: object,
+    ) -> None:
         self._lines = list(lines or [])
+        self._responses_per_write = list(responses_per_write or [])
         self.is_open = True
         self.port = "ttyFAKE0"
         self.written: list[bytes] = []
+        self.input_reset = 0
+        self.output_reset = 0
 
     def write(self, payload: bytes) -> None:
         self.written.append(payload)
+        write_index = len(self.written) - 1
+        if write_index < len(self._responses_per_write):
+            self._lines.extend(self._responses_per_write[write_index])
 
     def readline(self) -> bytes:
         if self._lines:
@@ -25,9 +37,15 @@ class FakeSerial:
     def close(self) -> None:
         self.is_open = False
 
+    def reset_input_buffer(self) -> None:
+        self.input_reset += 1
+
+    def reset_output_buffer(self) -> None:
+        self.output_reset += 1
+
 
 def test_send_command_ack_success(monkeypatch) -> None:
-    fake = FakeSerial(lines=[b"Starting\n", b"GO\n"])
+    fake = FakeSerial(responses_per_write=[[b"GO\n"], [b"GO\n"]])
     monkeypatch.setattr(transport_mod.serial, "Serial", lambda **_: fake)
 
     profile = MachineProfile(ack_timeout_seconds=0.1)
@@ -37,11 +55,14 @@ def test_send_command_ack_success(monkeypatch) -> None:
 
     assert ack.ok is True
     assert ack.timed_out is False
-    assert fake.written[0] == b"G28\n"
+    assert fake.written[0] == b"G92 H\n"
+    assert fake.written[1] == b"G28\n"
+    assert fake.input_reset >= 1
+    assert fake.output_reset >= 1
 
 
 def test_send_command_timeout(monkeypatch) -> None:
-    fake = FakeSerial(lines=[])
+    fake = FakeSerial(responses_per_write=[[b"GO\n"], []])
     monkeypatch.setattr(transport_mod.serial, "Serial", lambda **_: fake)
 
     profile = MachineProfile(ack_timeout_seconds=0.05)
@@ -52,6 +73,20 @@ def test_send_command_timeout(monkeypatch) -> None:
     assert ack.ok is False
     assert ack.timed_out is True
     assert ack.error is not None
+
+
+def test_connect_preflight_failure(monkeypatch) -> None:
+    fake = FakeSerial(lines=[])
+    monkeypatch.setattr(transport_mod.serial, "Serial", lambda **_: fake)
+
+    profile = MachineProfile(ack_timeout_seconds=0.05)
+    transport = NanoTransport(profile)
+    try:
+        transport.connect("ttyFAKE0")
+    except RuntimeError as exc:
+        assert "USB preflight failed" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError for failed preflight")
 
 
 def test_list_ports(monkeypatch) -> None:

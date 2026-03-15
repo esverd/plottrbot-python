@@ -7,6 +7,7 @@ Phase 1 Python/Linux port of the `plottrbot-csharp` desktop app.
 - BMP workflow: load, move, slice, preview, and stream commands to Nano.
 - Manual robot controls over USB serial (`9600`, newline commands, `GO` ack).
 - SVG draw/send is intentionally deferred in this phase.
+- Linux sleep is inhibited while USB is connected and an active stream is running.
 
 ## Quick start
 
@@ -18,6 +19,13 @@ python3 -m plottrbot
 ```
 
 Settings are stored at `~/.config/plottrbot/config.json`.
+
+## Streaming safety behaviors
+
+- USB connect runs a preflight (`G92 H`) and requires a valid `GO` acknowledgement.
+- Manual serial actions run asynchronously to avoid UI freezing on slow serial responses.
+- Streaming includes `Pause` and `Stop`; optional stop recovery sends `G1 Z1` then `G28`.
+- Out-of-bounds generated paths are blocked before streaming.
 
 ## Run tests
 
