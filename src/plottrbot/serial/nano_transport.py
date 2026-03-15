@@ -72,7 +72,7 @@ class NanoTransport:
         self._serial.reset_output_buffer()
         time.sleep(0.25)
 
-        warmup_deadline = time.monotonic() + 0.6
+        warmup_deadline = time.monotonic() + 2.0
         while time.monotonic() < warmup_deadline:
             try:
                 raw = self._serial.readline()
@@ -84,10 +84,21 @@ class NanoTransport:
             if startup_line:
                 self._emit_log(f"< {startup_line}")
 
-        preflight = self.send_command("G92 H", timeout_seconds=min(8.0, self.profile.ack_timeout_seconds))
-        if not preflight.ok:
+        preflight_timeout = max(0.2, min(2.0, self.profile.ack_timeout_seconds))
+        retry_delay = max(0.05, min(0.4, self.profile.ack_timeout_seconds))
+        preflight_ok = False
+        last_error = "unknown error"
+        for attempt in range(1, 5):
+            preflight = self.send_command("G92 H", timeout_seconds=preflight_timeout)
+            if preflight.ok:
+                preflight_ok = True
+                break
+            last_error = preflight.error or "unknown error"
+            self._emit_log(f"Preflight attempt {attempt} failed: {last_error}")
+            time.sleep(retry_delay)
+        if not preflight_ok:
             self.disconnect()
-            raise RuntimeError(f"USB preflight failed: {preflight.error}")
+            raise RuntimeError(f"USB preflight failed: {last_error}")
 
     def disconnect(self) -> None:
         if self._serial is None:

@@ -44,6 +44,16 @@ class FakeSerial:
         self.output_reset += 1
 
 
+class StepClock:
+    def __init__(self, *, step: float = 0.11) -> None:
+        self.value = 0.0
+        self.step = step
+
+    def monotonic(self) -> float:
+        self.value += self.step
+        return self.value
+
+
 def test_send_command_ack_success(monkeypatch) -> None:
     fake = FakeSerial(responses_per_write=[[b"GO\n"], [b"GO\n"]])
     monkeypatch.setattr(transport_mod.serial, "Serial", lambda **_: fake)
@@ -87,6 +97,24 @@ def test_connect_preflight_failure(monkeypatch) -> None:
         assert "USB preflight failed" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError for failed preflight")
+
+
+def test_connect_preflight_retries_then_succeeds(monkeypatch) -> None:
+    fake = FakeSerial(responses_per_write=[[], [b"GO\n"]])
+    monkeypatch.setattr(transport_mod.serial, "Serial", lambda **_: fake)
+    monkeypatch.setattr(transport_mod.time, "sleep", lambda _seconds: None)
+
+    clock = StepClock()
+    monkeypatch.setattr(transport_mod.time, "monotonic", clock.monotonic)
+
+    logs: list[str] = []
+    profile = MachineProfile(ack_timeout_seconds=0.05)
+    transport = NanoTransport(profile, on_log=logs.append)
+    transport.connect("ttyFAKE0")
+
+    assert transport.is_connected is True
+    assert fake.written[:2] == [b"G92 H\n", b"G92 H\n"]
+    assert any("Preflight attempt 1 failed" in line for line in logs)
 
 
 def test_list_ports(monkeypatch) -> None:
