@@ -33,6 +33,7 @@ def test_sleep_inhibitor_start_stop(monkeypatch) -> None:
 
     logs: list[str] = []
     inhibitor = SleepInhibitor(on_log=logs.append)
+    assert inhibitor.is_supported is True
     inhibitor.start()
     assert inhibitor.is_active is True
     inhibitor.stop()
@@ -47,6 +48,7 @@ def test_sleep_inhibitor_unsupported(monkeypatch) -> None:
 
     logs: list[str] = []
     inhibitor = SleepInhibitor(on_log=logs.append)
+    assert inhibitor.is_supported is False
     inhibitor.start()
     inhibitor.start()
     assert inhibitor.is_active is False

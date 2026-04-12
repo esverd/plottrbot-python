@@ -39,11 +39,12 @@ For repeatable software + hardware validation steps, see:
 
 - `docs/testing-suite-procedure.md`
 - `scripts/run_hardware_validation.py`
+- `scripts/run_deep_hardware_validation.py`
 
 ## Hardware smoke order
 
 1. Connect to Nano and test `M17`, `M18`, `G1 Z0`, `G1 Z1`, `G28`.
 2. Load a small BMP and verify preview placement + selected-line highlight.
-3. Send a short BMP job, pause, resume, then restart from a command number.
+3. Send a short BMP job, pause, resume, then restart from a line number.
 4. Run bounding-box trace with pen-up and pen-down.
 5. Compare the same BMP run against the C# app behavior.

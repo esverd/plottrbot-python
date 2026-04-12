@@ -132,9 +132,12 @@ def _run_backend_suite(port: str, bmp_path: Path, profile: MachineProfile) -> No
     transport.disconnect()
     if transport.is_connected:
         raise RuntimeError("Transport still connected after disconnect.")
-    if not saw_inhibitor_active["value"]:
-        raise RuntimeError("Sleep inhibitor was never observed active during stream.")
-    print("[backend] sleep inhibitor active during stream and released after")
+    if inhibitor.is_supported:
+        if not saw_inhibitor_active["value"]:
+            raise RuntimeError("Sleep inhibitor was never observed active during stream.")
+        print("[backend] sleep inhibitor active during stream and released after")
+    else:
+        print("[backend] sleep inhibitor unsupported on this platform; skipped active-state assertion")
     print("[backend] done")
 
 

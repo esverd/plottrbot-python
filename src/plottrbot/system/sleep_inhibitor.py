@@ -15,6 +15,10 @@ class SleepInhibitor:
         self._warned_unsupported = False
 
     @property
+    def is_supported(self) -> bool:
+        return self._supported
+
+    @property
     def is_active(self) -> bool:
         return self._process is not None and self._process.poll() is None
 

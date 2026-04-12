@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
 
         cmd_row = QHBoxLayout()
         self.txt_cmd_start = QLineEdit("0")
-        self.btn_cmd_start = QPushButton("Start from cmd number")
+        self.btn_cmd_start = QPushButton("Start from line number")
         cmd_row.addWidget(self.txt_cmd_start)
         cmd_row.addWidget(self.btn_cmd_start)
         layout.addLayout(cmd_row)
@@ -716,11 +716,11 @@ class MainWindow(QMainWindow):
         if not self.job_state.lines:
             QMessageBox.information(self, "No slice", "Slice the image first.")
             return
-        line_number = self._parse_int(self.txt_cmd_start, "Command number")
+        line_number = self._parse_int(self.txt_cmd_start, "Line number")
         if line_number is None:
             return
         if line_number < 0 or line_number >= len(self.job_state.lines):
-            QMessageBox.warning(self, "Out of range", "Command number out of range.")
+            QMessageBox.warning(self, "Out of range", "Line number out of range.")
             return
 
         if self.job_state.line_to_command_index:
@@ -736,7 +736,7 @@ class MainWindow(QMainWindow):
         self.preview_canvas.set_selected_line(value)
 
     def _on_slider_from_text(self) -> None:
-        value = self._parse_int(self.txt_cmd_start, "Command number")
+        value = self._parse_int(self.txt_cmd_start, "Line number")
         if value is None:
             return
         self.slider_cmd_count.setValue(value)

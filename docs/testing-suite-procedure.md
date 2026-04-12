@@ -50,7 +50,7 @@ What this validates:
 - manual command path (`M17`, `M18`, `G1 Z0`, `G1 Z1`, `G28`, `G92 H`)
 - BMP conversion + full image stream completion
 - pause/resume behavior mid-stream
-- restart from command index
+- restart from line number
 - bounding-box trace commands (pen up and pen down modes)
 - sleep inhibitor active during streaming and released after
 - real `MainWindow` workflow in Qt (slice, connect, send, pause/resume, finish, disconnect)
@@ -66,7 +66,18 @@ If Qt/offscreen is unavailable:
 python scripts/run_hardware_validation.py --port /dev/ttyACM0 --skip-ui
 ```
 
-## 6. Troubleshooting
+## 6. Deep Operator Workflow
+
+For a more operator-like pass that exercises DPI changes, image placement, hold/release, direct command probes, bounding-box traces, full BMP streaming, pause/resume, restart from line number, and stop recovery:
+
+```bash
+QT_QPA_PLATFORM=offscreen python scripts/run_deep_hardware_validation.py --port /dev/ttyACM0
+```
+
+Expected result:
+- Script exits with `Deep hardware validation suite passed.`
+
+## 7. Troubleshooting
 
 - Serial permission error (`Permission denied`):
   - Ensure user is in `dialout` group.
