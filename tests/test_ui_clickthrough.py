@@ -294,6 +294,13 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     assert len(streamer.send_calls) == send_calls_before + 1
     _, resumed_start_index = streamer.send_calls[-1]
     assert resumed_start_index == expected_start_index
+    streamer._state = SendSessionState(
+        status=SendStatus.COMPLETED,
+        start_index=resumed_start_index,
+        current_index=len(window.job_state.gcode),
+        total_commands=len(window.job_state.gcode),
+    )
+    window._on_stream_state(streamer.state)
 
     window.txt_robot_width.setText("1200")
     window.txt_robot_height.setText("900")

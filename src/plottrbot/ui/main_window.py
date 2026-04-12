@@ -467,6 +467,9 @@ class MainWindow(QMainWindow):
     def _on_clear_image(self) -> None:
         self.job_state.clear_image()
         self.preview_canvas.clear_all()
+        if self.job_state.retained_image is not None:
+            self.preview_canvas.set_render_mode("image")
+            self._render_retained_overlay()
         self.slider_cmd_count.setMaximum(0)
         self.slider_cmd_count.setValue(0)
         self._update_ui_state()
@@ -803,6 +806,9 @@ class MainWindow(QMainWindow):
             if state_obj.status == SendStatus.ERROR and state_obj.last_error:
                 QMessageBox.warning(self, "Streaming error", state_obj.last_error)
             self._append_log(f"Commands successfully sent = {state_obj.current_index}")
+            if state_obj.status == SendStatus.COMPLETED:
+                self.job_state.current_send_index = 0
+                self._pending_stop_recovery = False
             if (
                 self._pending_stop_recovery
                 and self.transport.is_connected
@@ -825,6 +831,8 @@ class MainWindow(QMainWindow):
         is_sliced = bool(self.job_state.lines)
         usb_connected = self.transport.is_connected
         stream_active = self._stream_is_active()
+        interaction_locked = stream_active or self._manual_busy
+        retained_available = self.job_state.retained_image is not None
         self.current_ui_state = derive_ui_state(
             has_image=has_image,
             is_sliced=is_sliced,
@@ -834,14 +842,19 @@ class MainWindow(QMainWindow):
 
         self.btn_connect.setText("Disconnect" if usb_connected else "Connect USB")
 
-        self.txt_move_x.setEnabled(has_image)
-        self.txt_move_y.setEnabled(has_image)
-        self.btn_move_img.setEnabled(has_image)
-        self.btn_center_img.setEnabled(has_image)
-        self.btn_clear_img.setEnabled(has_image)
-        self.btn_slice_img.setEnabled(has_image)
-        self.btn_hold_img.setEnabled(has_image or self.job_state.retained_image is not None)
-
+        self.btn_select_img.setEnabled(not interaction_locked)
+        self.txt_move_x.setEnabled(has_image and not interaction_locked)
+        self.txt_move_y.setEnabled(has_image and not interaction_locked)
+        self.btn_move_img.setEnabled(has_image and not interaction_locked)
+        self.btn_center_img.setEnabled(has_image and not interaction_locked)
+        self.btn_clear_img.setEnabled(has_image and not interaction_locked)
+        self.btn_slice_img.setEnabled(has_image and not interaction_locked)
+        self.btn_hold_img.setEnabled((has_image or retained_available) and not interaction_locked)
+        self.txt_dpi.setEnabled(has_image and not interaction_locked)
+        self.btn_update_dpi.setEnabled(has_image and not interaction_locked)
+        self.combo_port.setEnabled((not usb_connected) and not interaction_locked)
+        self.btn_refresh_ports.setEnabled((not usb_connected) and not interaction_locked)
+        self.btn_connect.setEnabled(not interaction_locked)
         sliced_controls = is_sliced
         self.slider_cmd_count.setEnabled(sliced_controls)
         self.btn_slider_dec.setEnabled(sliced_controls)

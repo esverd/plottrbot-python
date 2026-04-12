@@ -334,3 +334,58 @@ def test_stop_recovery_and_sleep_inhibitor_flow(qtbot, settings_store, tmp_path:
     assert "G1 Z1" in transport.sent
     assert "G28" in transport.sent
     assert inhibitor.stopped >= 1
+
+
+def test_stream_active_locks_mutating_controls_and_completion_resets_send_index(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    window._update_ui_state()
+
+    assert window.btn_select_img.isEnabled() is True
+    assert window.btn_clear_img.isEnabled() is True
+    assert window.btn_connect.isEnabled() is True
+
+    window._on_send_image()
+
+    assert window.btn_select_img.isEnabled() is False
+    assert window.btn_clear_img.isEnabled() is False
+    assert window.btn_slice_img.isEnabled() is False
+    assert window.btn_connect.isEnabled() is False
+    assert window.btn_pause_drawing.isEnabled() is True
+    assert window.btn_stop_drawing.isEnabled() is True
+
+    streamer._state = SendSessionState(
+        status=SendStatus.COMPLETED,
+        start_index=0,
+        current_index=len(window.job_state.gcode),
+        total_commands=len(window.job_state.gcode),
+    )
+    window._on_stream_state(
+        SendSessionState(
+            status=SendStatus.COMPLETED,
+            start_index=0,
+            current_index=len(window.job_state.gcode),
+            total_commands=len(window.job_state.gcode),
+        )
+    )
+
+    assert window.job_state.current_send_index == 0
+    assert window.btn_select_img.isEnabled() is True
+    assert window.btn_clear_img.isEnabled() is True
+    assert window.btn_connect.isEnabled() is True
