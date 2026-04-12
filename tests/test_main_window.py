@@ -257,6 +257,29 @@ def test_manual_command_async_does_not_block_ui(qtbot, settings_store) -> None:
     assert "M17" in transport.sent
 
 
+def test_close_waits_for_manual_worker_completion(qtbot, settings_store) -> None:
+    transport = FakeTransport(delay_seconds=0.15)
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    window._send_manual_commands_async(["M17"], "Enable motors")
+    start = time.monotonic()
+    window.close()
+    elapsed = time.monotonic() - start
+
+    assert elapsed >= 0.10
+    assert "M17" in transport.sent
+    assert window._manual_worker is None
+
+
 def test_bounds_validation_blocks_send(qtbot, settings_store, tmp_path: Path, monkeypatch) -> None:
     transport = FakeTransport()
     transport.connected = True
@@ -389,3 +412,32 @@ def test_stream_active_locks_mutating_controls_and_completion_resets_send_index(
     assert window.btn_select_img.isEnabled() is True
     assert window.btn_clear_img.isEnabled() is True
     assert window.btn_connect.isEnabled() is True
+
+
+def test_clear_image_preserves_retained_overlay(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_hold_release_image()
+
+    assert window.job_state.retained_image is not None
+    assert window.preview_canvas._retained_image is not None
+
+    window._on_clear_image()
+
+    assert window.job_state.loaded_file is None
+    assert window.job_state.retained_image is not None
+    assert window.preview_canvas._primary_image is None
+    assert window.preview_canvas._retained_image is not None
+    assert window.preview_canvas.render_mode == "image"

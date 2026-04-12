@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
 
         self._is_drawing = False
         self._manual_busy = False
+        self._manual_worker: threading.Thread | None = None
         self._pending_stop_recovery = False
         self.current_ui_state = UiState.BLANK
 
@@ -631,6 +632,7 @@ class MainWindow(QMainWindow):
             daemon=True,
             name="plottrbot-manual-command-worker",
         )
+        self._manual_worker = worker
         worker.start()
 
     def _manual_command_worker(self, commands: list[str], label: str) -> None:
@@ -649,11 +651,23 @@ class MainWindow(QMainWindow):
     def _on_manual_command_result(self, result_obj: object) -> None:
         if not isinstance(result_obj, ManualCommandResult):
             return
+        self._manual_worker = None
         self._set_manual_busy(False)
         if result_obj.ok:
             self._append_log(f"{result_obj.label}: done")
             return
         QMessageBox.warning(self, "Serial error", result_obj.error or "Unknown error")
+
+    def _wait_for_manual_worker(self, timeout_seconds: float = 1.0) -> None:
+        worker = self._manual_worker
+        if worker is None:
+            return
+        worker.join(timeout=timeout_seconds)
+        if worker.is_alive():
+            self._append_log("Manual command worker still active during shutdown; closing anyway.")
+            return
+        self._manual_worker = None
+        self._manual_busy = False
 
     def _on_send_raw_serial(self) -> None:
         command = self.txt_serial_cmd.text().strip()
@@ -890,6 +904,7 @@ class MainWindow(QMainWindow):
         ] or ["G1 Z1", "G28"]
         self.settings_store.save(self.settings)
         self.streamer.reset()
+        self._wait_for_manual_worker()
         self.transport.disconnect()
         self.sleep_inhibitor.stop()
         super().closeEvent(event)  # type: ignore[arg-type]
