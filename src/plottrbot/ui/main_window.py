@@ -144,8 +144,6 @@ class MainWindow(QMainWindow):
         move_grid.addWidget(QLabel("Top-left Y [mm]"), 1, 0)
         move_grid.addWidget(self.txt_move_y, 1, 1)
         move_grid.addWidget(self.btn_center_img, 1, 2)
-        self.lbl_center_position = QLabel("Image center: X 0 mm, Y 0 mm")
-        move_grid.addWidget(self.lbl_center_position, 2, 0, 1, 3)
 
         zoom_row = QHBoxLayout()
         zoom_row.addWidget(self.btn_zoom_out)
@@ -396,11 +394,6 @@ class MainWindow(QMainWindow):
     def _update_position_fields(self) -> None:
         self.txt_move_x.setText(str(self.job_state.img_move_x_mm))
         self.txt_move_y.setText(str(self.job_state.img_move_y_mm))
-        if self.job_state.loaded_file is None:
-            self.lbl_center_position.setText("Image center: X 0 mm, Y 0 mm")
-            return
-        center_x_mm, center_y_mm = self._get_display_center_position()
-        self.lbl_center_position.setText(f"Image center: X {center_x_mm} mm, Y {center_y_mm} mm")
 
     def _on_select_image(self) -> None:
         selected_file, _ = QFileDialog.getOpenFileName(
