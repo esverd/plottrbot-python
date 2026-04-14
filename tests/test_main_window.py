@@ -147,6 +147,7 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
     bmp_path = tmp_path / "img.bmp"
     _create_simple_bmp(bmp_path)
     window._load_bmp(bmp_path)
+    assert int(round(window.job_state.image_dpi)) == 35
 
     assert window.btn_slice_img.isEnabled() is True
     assert window.slider_cmd_count.isEnabled() is False
@@ -297,10 +298,10 @@ def test_center_image_uses_top_left_origin_coordinates(qtbot, settings_store, tm
     image.save(bmp_path, format="BMP", dpi=(25.4, 25.4))
 
     window._load_bmp(bmp_path)
-    assert window.job_state.img_move_x_mm == 479
-    assert window.job_state.img_move_y_mm == 249
-    assert window.txt_move_x.text() == "479"
-    assert window.txt_move_y.text() == "249"
+    assert window.job_state.img_move_x_mm == 548
+    assert window.job_state.img_move_y_mm == 318
+    assert window.txt_move_x.text() == "548"
+    assert window.txt_move_y.text() == "318"
 
     window._on_center_or_top_left()
     assert window.job_state.img_move_x_mm == 0
@@ -309,10 +310,10 @@ def test_center_image_uses_top_left_origin_coordinates(qtbot, settings_store, tm
     assert window.txt_move_y.text() == "0"
 
     window._on_center_or_top_left()
-    assert window.job_state.img_move_x_mm == 479
-    assert window.job_state.img_move_y_mm == 249
-    assert window.txt_move_x.text() == "479"
-    assert window.txt_move_y.text() == "249"
+    assert window.job_state.img_move_x_mm == 548
+    assert window.job_state.img_move_y_mm == 318
+    assert window.txt_move_x.text() == "548"
+    assert window.txt_move_y.text() == "318"
 
 
 def test_dpi_update_preserves_top_left_position(qtbot, settings_store, tmp_path: Path) -> None:
@@ -339,6 +340,28 @@ def test_dpi_update_preserves_top_left_position(qtbot, settings_store, tmp_path:
 
     assert window.txt_move_x.text() == initial_x
     assert window.txt_move_y.text() == initial_y
+
+
+def test_load_bmp_uses_default_dpi_override(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "default_dpi.bmp"
+    _create_simple_bmp(bmp_path)
+
+    window._load_bmp(bmp_path)
+
+    assert window.job_state.dpi_override == 35
+    assert int(round(window.job_state.image_dpi)) == 35
+    assert window.txt_dpi.text() == "35"
 
 
 def test_motor_power_buttons_follow_saved_setting(qtbot, settings_store) -> None:

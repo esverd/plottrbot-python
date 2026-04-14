@@ -50,6 +50,8 @@ class ManualCommandResult:
 
 
 class MainWindow(QMainWindow):
+    DEFAULT_BMP_DPI = 35
+
     def __init__(
         self,
         *,
@@ -309,6 +311,7 @@ class MainWindow(QMainWindow):
         profile = self.settings.machine_profile
         self.txt_robot_width.setText(str(profile.canvas_width_mm))
         self.txt_robot_height.setText(str(profile.canvas_height_mm))
+        self.txt_dpi.setText(str(self.DEFAULT_BMP_DPI))
         self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")
         self.checkbox_motor_power_commands.setChecked(self.settings.motor_power_commands_enabled)
         self.btn_pause_drawing.setText("Pause drawing")
@@ -407,6 +410,7 @@ class MainWindow(QMainWindow):
         self.job_state.current_send_index = 0
         self.job_state.command_to_line_index.clear()
         self.job_state.line_to_command_index.clear()
+        self.job_state.dpi_override = self.DEFAULT_BMP_DPI
 
         metadata = self.converter.inspect_image(image_path, dpi_override=self.job_state.dpi_override)
         self.job_state.image_width_mm = metadata.image_width_mm
