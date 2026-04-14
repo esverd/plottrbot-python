@@ -302,18 +302,24 @@ def test_center_image_uses_top_left_origin_coordinates(qtbot, settings_store, tm
     assert window.job_state.img_move_y_mm == 318
     assert window.txt_move_x.text() == "548"
     assert window.txt_move_y.text() == "318"
+    assert window.txt_center_x.text() == "730"
+    assert window.txt_center_y.text() == "500"
 
     window._on_center_or_top_left()
     assert window.job_state.img_move_x_mm == 0
     assert window.job_state.img_move_y_mm == 0
     assert window.txt_move_x.text() == "0"
     assert window.txt_move_y.text() == "0"
+    assert window.txt_center_x.text() == "182"
+    assert window.txt_center_y.text() == "182"
 
     window._on_center_or_top_left()
     assert window.job_state.img_move_x_mm == 548
     assert window.job_state.img_move_y_mm == 318
     assert window.txt_move_x.text() == "548"
     assert window.txt_move_y.text() == "318"
+    assert window.txt_center_x.text() == "730"
+    assert window.txt_center_y.text() == "500"
 
 
 def test_dpi_update_preserves_top_left_position(qtbot, settings_store, tmp_path: Path) -> None:
@@ -334,12 +340,24 @@ def test_dpi_update_preserves_top_left_position(qtbot, settings_store, tmp_path:
 
     initial_x = window.txt_move_x.text()
     initial_y = window.txt_move_y.text()
+    assert window.txt_center_x.text() == str(
+        int(round(window.job_state.img_move_x_mm + (window.job_state.image_width_mm / 2.0)))
+    )
+    assert window.txt_center_y.text() == str(
+        int(round(window.job_state.img_move_y_mm + (window.job_state.image_height_mm / 2.0)))
+    )
 
     window.txt_dpi.setText("50")
     window._on_update_dpi()
 
     assert window.txt_move_x.text() == initial_x
     assert window.txt_move_y.text() == initial_y
+    assert window.txt_center_x.text() == str(
+        int(round(window.job_state.img_move_x_mm + (window.job_state.image_width_mm / 2.0)))
+    )
+    assert window.txt_center_y.text() == str(
+        int(round(window.job_state.img_move_y_mm + (window.job_state.image_height_mm / 2.0)))
+    )
 
 
 def test_load_bmp_uses_default_dpi_override(qtbot, settings_store, tmp_path: Path) -> None:
@@ -362,6 +380,8 @@ def test_load_bmp_uses_default_dpi_override(qtbot, settings_store, tmp_path: Pat
     assert window.job_state.dpi_override == 35
     assert int(round(window.job_state.image_dpi)) == 35
     assert window.txt_dpi.text() == "35"
+    assert int(window.txt_center_x.text()) > int(window.txt_move_x.text())
+    assert int(window.txt_center_y.text()) > int(window.txt_move_y.text())
 
 
 def test_motor_power_buttons_follow_saved_setting(qtbot, settings_store) -> None:

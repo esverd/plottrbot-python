@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
         image_group = QGroupBox("Image options")
         image_layout = QVBoxLayout(image_group)
         self.btn_select_img = QPushButton("Select image")
-        self.btn_move_img = QPushButton("Set position")
+        self.btn_move_img = QPushButton("Set top-left position")
         self.btn_center_img = QPushButton("Move top left")
         self.btn_clear_img = QPushButton("Clear")
         self.btn_zoom_out = QPushButton("Zoom out")
@@ -144,6 +144,14 @@ class MainWindow(QMainWindow):
         move_grid.addWidget(QLabel("Top-left Y [mm]"), 1, 0)
         move_grid.addWidget(self.txt_move_y, 1, 1)
         move_grid.addWidget(self.btn_center_img, 1, 2)
+        self.txt_center_x = QLineEdit("0")
+        self.txt_center_x.setReadOnly(True)
+        self.txt_center_y = QLineEdit("0")
+        self.txt_center_y.setReadOnly(True)
+        move_grid.addWidget(QLabel("Image center X [mm]"), 2, 0)
+        move_grid.addWidget(self.txt_center_x, 2, 1)
+        move_grid.addWidget(QLabel("Image center Y [mm]"), 3, 0)
+        move_grid.addWidget(self.txt_center_y, 3, 1)
 
         zoom_row = QHBoxLayout()
         zoom_row.addWidget(self.btn_zoom_out)
@@ -377,14 +385,30 @@ class MainWindow(QMainWindow):
         self.preview_canvas.clear_bbox_overlay()
         self._render_retained_overlay()
         self._render_primary_image()
-        self.txt_move_x.setText(str(self.job_state.img_move_x_mm))
-        self.txt_move_y.setText(str(self.job_state.img_move_y_mm))
+        self._update_position_fields()
 
     def _get_centered_image_origin(self, width_mm: float, height_mm: float) -> tuple[int, int]:
         return (
             max(int(round((self.settings.machine_profile.canvas_width_mm - width_mm) / 2)), 0),
             max(int(round((self.settings.machine_profile.canvas_height_mm - height_mm) / 2)), 0),
         )
+
+    def _get_display_center_position(self) -> tuple[int, int]:
+        return (
+            int(round(self.job_state.img_move_x_mm + (self.job_state.image_width_mm / 2.0))),
+            int(round(self.job_state.img_move_y_mm + (self.job_state.image_height_mm / 2.0))),
+        )
+
+    def _update_position_fields(self) -> None:
+        self.txt_move_x.setText(str(self.job_state.img_move_x_mm))
+        self.txt_move_y.setText(str(self.job_state.img_move_y_mm))
+        if self.job_state.loaded_file is None:
+            self.txt_center_x.setText("0")
+            self.txt_center_y.setText("0")
+            return
+        center_x_mm, center_y_mm = self._get_display_center_position()
+        self.txt_center_x.setText(str(center_x_mm))
+        self.txt_center_y.setText(str(center_y_mm))
 
     def _on_select_image(self) -> None:
         selected_file, _ = QFileDialog.getOpenFileName(
@@ -486,6 +510,7 @@ class MainWindow(QMainWindow):
         if self.job_state.retained_image is not None:
             self.preview_canvas.set_render_mode("image")
             self._render_retained_overlay()
+        self._update_position_fields()
         self.slider_cmd_count.setMaximum(0)
         self.slider_cmd_count.setValue(0)
         self._update_ui_state()
