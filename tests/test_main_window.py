@@ -280,7 +280,7 @@ def test_close_waits_for_manual_worker_completion(qtbot, settings_store) -> None
     assert window._manual_worker is None
 
 
-def test_center_image_uses_center_display_coordinates(qtbot, settings_store, tmp_path: Path) -> None:
+def test_center_image_uses_top_left_origin_coordinates(qtbot, settings_store, tmp_path: Path) -> None:
     transport = FakeTransport()
     streamer = FakeStreamer()
     inhibitor = FakeSleepInhibitor()
@@ -299,23 +299,23 @@ def test_center_image_uses_center_display_coordinates(qtbot, settings_store, tmp
     window._load_bmp(bmp_path)
     assert window.job_state.img_move_x_mm == 479
     assert window.job_state.img_move_y_mm == 249
-    assert window.txt_move_x.text() == "730"
-    assert window.txt_move_y.text() == "500"
+    assert window.txt_move_x.text() == "479"
+    assert window.txt_move_y.text() == "249"
 
     window._on_center_or_top_left()
     assert window.job_state.img_move_x_mm == 0
     assert window.job_state.img_move_y_mm == 0
-    assert window.txt_move_x.text() == "251"
-    assert window.txt_move_y.text() == "251"
+    assert window.txt_move_x.text() == "0"
+    assert window.txt_move_y.text() == "0"
 
     window._on_center_or_top_left()
     assert window.job_state.img_move_x_mm == 479
     assert window.job_state.img_move_y_mm == 249
-    assert window.txt_move_x.text() == "730"
-    assert window.txt_move_y.text() == "500"
+    assert window.txt_move_x.text() == "479"
+    assert window.txt_move_y.text() == "249"
 
 
-def test_dpi_update_preserves_display_center_position(qtbot, settings_store, tmp_path: Path) -> None:
+def test_dpi_update_preserves_top_left_position(qtbot, settings_store, tmp_path: Path) -> None:
     transport = FakeTransport()
     streamer = FakeStreamer()
     inhibitor = FakeSleepInhibitor()
@@ -331,14 +331,14 @@ def test_dpi_update_preserves_display_center_position(qtbot, settings_store, tmp
     _create_simple_bmp(bmp_path)
     window._load_bmp(bmp_path)
 
-    assert window.txt_move_x.text() == "730"
-    assert window.txt_move_y.text() == "500"
+    initial_x = window.txt_move_x.text()
+    initial_y = window.txt_move_y.text()
 
     window.txt_dpi.setText("50")
     window._on_update_dpi()
 
-    assert window.txt_move_x.text() == "730"
-    assert window.txt_move_y.text() == "500"
+    assert window.txt_move_x.text() == initial_x
+    assert window.txt_move_y.text() == initial_y
 
 
 def test_motor_power_buttons_follow_saved_setting(qtbot, settings_store) -> None:

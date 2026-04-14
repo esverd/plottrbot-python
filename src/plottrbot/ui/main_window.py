@@ -136,10 +136,10 @@ class MainWindow(QMainWindow):
         move_grid = QGridLayout()
         self.txt_move_x = QLineEdit("0")
         self.txt_move_y = QLineEdit("0")
-        move_grid.addWidget(QLabel("Image center X [mm]"), 0, 0)
+        move_grid.addWidget(QLabel("Top-left X [mm]"), 0, 0)
         move_grid.addWidget(self.txt_move_x, 0, 1)
         move_grid.addWidget(self.btn_move_img, 0, 2)
-        move_grid.addWidget(QLabel("Image center Y [mm]"), 1, 0)
+        move_grid.addWidget(QLabel("Top-left Y [mm]"), 1, 0)
         move_grid.addWidget(self.txt_move_y, 1, 1)
         move_grid.addWidget(self.btn_center_img, 1, 2)
 
@@ -374,28 +374,13 @@ class MainWindow(QMainWindow):
         self.preview_canvas.clear_bbox_overlay()
         self._render_retained_overlay()
         self._render_primary_image()
-        center_x_mm, center_y_mm = self._get_display_center_position()
-        self.txt_move_x.setText(str(center_x_mm))
-        self.txt_move_y.setText(str(center_y_mm))
+        self.txt_move_x.setText(str(self.job_state.img_move_x_mm))
+        self.txt_move_y.setText(str(self.job_state.img_move_y_mm))
 
     def _get_centered_image_origin(self, width_mm: float, height_mm: float) -> tuple[int, int]:
         return (
             max(int(round((self.settings.machine_profile.canvas_width_mm - width_mm) / 2)), 0),
             max(int(round((self.settings.machine_profile.canvas_height_mm - height_mm) / 2)), 0),
-        )
-
-    def _get_display_center_position(self) -> tuple[int, int]:
-        if self.job_state.loaded_file is None:
-            return self.job_state.img_move_x_mm, self.job_state.img_move_y_mm
-        return (
-            int(round(self.job_state.img_move_x_mm + (self.job_state.image_width_mm / 2.0))),
-            int(round(self.job_state.img_move_y_mm + (self.job_state.image_height_mm / 2.0))),
-        )
-
-    def _get_origin_from_display_center(self, center_x_mm: int, center_y_mm: int) -> tuple[int, int]:
-        return (
-            max(int(round(center_x_mm - (self.job_state.image_width_mm / 2.0))), 0),
-            max(int(round(center_y_mm - (self.job_state.image_height_mm / 2.0))), 0),
         )
 
     def _on_select_image(self) -> None:
@@ -452,15 +437,10 @@ class MainWindow(QMainWindow):
         self.job_state.dpi_override = dpi_value
         if self.job_state.loaded_file is None:
             return
-        center_x_mm, center_y_mm = self._get_display_center_position()
         metadata = self.converter.inspect_image(self.job_state.loaded_file, dpi_override=dpi_value)
         self.job_state.image_width_mm = metadata.image_width_mm
         self.job_state.image_height_mm = metadata.image_height_mm
         self.job_state.image_dpi = metadata.dpi_x
-        self.job_state.img_move_x_mm, self.job_state.img_move_y_mm = self._get_origin_from_display_center(
-            center_x_mm,
-            center_y_mm,
-        )
         self._render_image_preview()
 
     def _on_move_image(self) -> None:
@@ -468,7 +448,8 @@ class MainWindow(QMainWindow):
         y = self._parse_int(self.txt_move_y, "Y")
         if x is None or y is None:
             return
-        self.job_state.img_move_x_mm, self.job_state.img_move_y_mm = self._get_origin_from_display_center(x, y)
+        self.job_state.img_move_x_mm = max(0, x)
+        self.job_state.img_move_y_mm = max(0, y)
         self._render_image_preview()
 
     def _on_center_or_top_left(self) -> None:

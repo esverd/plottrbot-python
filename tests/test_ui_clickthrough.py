@@ -177,8 +177,8 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     window.txt_move_x.setText("123")
     window.txt_move_y.setText("77")
     qtbot.mouseClick(window.btn_move_img, Qt.MouseButton.LeftButton)
-    assert window.job_state.img_move_x_mm == 120
-    assert window.job_state.img_move_y_mm == 74
+    assert window.job_state.img_move_x_mm == 123
+    assert window.job_state.img_move_y_mm == 77
     assert window.txt_move_x.text() == "123"
     assert window.txt_move_y.text() == "77"
 
@@ -186,15 +186,15 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     assert window.job_state.img_move_x_mm == 0
     assert window.job_state.img_move_y_mm == 0
     assert "center" in window.btn_center_img.text().lower()
-    assert int(window.txt_move_x.text()) > 0
-    assert int(window.txt_move_y.text()) > 0
+    assert window.txt_move_x.text() == "0"
+    assert window.txt_move_y.text() == "0"
 
     qtbot.mouseClick(window.btn_center_img, Qt.MouseButton.LeftButton)
     assert window.job_state.img_move_x_mm > 0
     assert window.job_state.img_move_y_mm > 0
     assert "top left" in window.btn_center_img.text().lower()
-    assert window.txt_move_x.text() == "730"
-    assert window.txt_move_y.text() == "500"
+    assert window.txt_move_x.text() == str(window.job_state.img_move_x_mm)
+    assert window.txt_move_y.text() == str(window.job_state.img_move_y_mm)
 
     initial_scale = window.preview_canvas.scale
     qtbot.mouseClick(window.btn_zoom_in, Qt.MouseButton.LeftButton)
