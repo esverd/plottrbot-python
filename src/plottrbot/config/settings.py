@@ -13,6 +13,7 @@ from plottrbot.core.models import MachineProfile
 class AppSettings:
     machine_profile: MachineProfile = field(default_factory=MachineProfile)
     end_gcode_lines: list[str] = field(default_factory=lambda: ["G1 Z1", "G28"])
+    motor_power_commands_enabled: bool = True
     last_port: str = ""
     window_width: int = 1600
     window_height: int = 1000
@@ -56,6 +57,7 @@ class SettingsStore:
         return AppSettings(
             machine_profile=profile,
             end_gcode_lines=end_gcode,
+            motor_power_commands_enabled=bool(raw.get("motor_power_commands_enabled", True)),
             last_port=str(raw.get("last_port", "")),
             window_width=int(raw.get("window_width", 1600)),
             window_height=int(raw.get("window_height", 1000)),

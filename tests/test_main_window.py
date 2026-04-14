@@ -280,6 +280,66 @@ def test_close_waits_for_manual_worker_completion(qtbot, settings_store) -> None
     assert window._manual_worker is None
 
 
+def test_center_image_uses_top_left_origin_coordinates(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "square.bmp"
+    image = Image.new("RGB", (502, 502), color=(255, 255, 255))
+    image.save(bmp_path, format="BMP", dpi=(25.4, 25.4))
+
+    window._load_bmp(bmp_path)
+    assert window.job_state.img_move_x_mm == 479
+    assert window.job_state.img_move_y_mm == 249
+
+    window._on_center_or_top_left()
+    assert window.job_state.img_move_x_mm == 0
+    assert window.job_state.img_move_y_mm == 0
+
+    window._on_center_or_top_left()
+    assert window.job_state.img_move_x_mm == 479
+    assert window.job_state.img_move_y_mm == 249
+    assert window.txt_move_x.text() == "479"
+    assert window.txt_move_y.text() == "249"
+
+
+def test_motor_power_buttons_follow_saved_setting(qtbot, settings_store) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    settings = settings_store.load()
+    settings.motor_power_commands_enabled = False
+    settings_store.save(settings)
+
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    window._update_ui_state()
+    assert window.checkbox_motor_power_commands.isChecked() is False
+    assert window.btn_enable_stepper.isEnabled() is False
+    assert window.btn_disable_stepper.isEnabled() is False
+
+    window.checkbox_motor_power_commands.setChecked(True)
+
+    assert window.btn_enable_stepper.isEnabled() is True
+    assert window.btn_disable_stepper.isEnabled() is True
+    assert settings_store.load().motor_power_commands_enabled is True
+
+
 def test_bounds_validation_blocks_send(qtbot, settings_store, tmp_path: Path, monkeypatch) -> None:
     transport = FakeTransport()
     transport.connected = True

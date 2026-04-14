@@ -136,10 +136,10 @@ class MainWindow(QMainWindow):
         move_grid = QGridLayout()
         self.txt_move_x = QLineEdit("0")
         self.txt_move_y = QLineEdit("0")
-        move_grid.addWidget(QLabel("X [mm]"), 0, 0)
+        move_grid.addWidget(QLabel("Top-left X [mm]"), 0, 0)
         move_grid.addWidget(self.txt_move_x, 0, 1)
         move_grid.addWidget(self.btn_move_img, 0, 2)
-        move_grid.addWidget(QLabel("Y [mm]"), 1, 0)
+        move_grid.addWidget(QLabel("Top-left Y [mm]"), 1, 0)
         move_grid.addWidget(self.txt_move_y, 1, 1)
         move_grid.addWidget(self.btn_center_img, 1, 2)
 
@@ -197,6 +197,8 @@ class MainWindow(QMainWindow):
         self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
         self.checkbox_stop_recovery.setChecked(True)
         layout.addWidget(self.checkbox_stop_recovery)
+        self.checkbox_motor_power_commands = QCheckBox("Enable motor power commands (M17/M18)")
+        layout.addWidget(self.checkbox_motor_power_commands)
 
         layout.addWidget(QLabel("End GCODE"))
         self.txt_end_gcode = QPlainTextEdit()
@@ -296,6 +298,7 @@ class MainWindow(QMainWindow):
         self.btn_home.clicked.connect(lambda: self._send_manual_commands_async(["G28"], "Move to home position"))
         self.btn_update_dpi.clicked.connect(self._on_update_dpi)
         self.btn_save_dims.clicked.connect(self._on_save_dimensions)
+        self.checkbox_motor_power_commands.toggled.connect(self._on_motor_power_commands_toggled)
 
         self.bridge.log_signal.connect(self._append_log)
         self.bridge.stream_state_signal.connect(self._on_stream_state)
@@ -307,6 +310,7 @@ class MainWindow(QMainWindow):
         self.txt_robot_width.setText(str(profile.canvas_width_mm))
         self.txt_robot_height.setText(str(profile.canvas_height_mm))
         self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")
+        self.checkbox_motor_power_commands.setChecked(self.settings.motor_power_commands_enabled)
         self.btn_pause_drawing.setText("Pause drawing")
         self._append_log("Ready")
 
@@ -373,6 +377,12 @@ class MainWindow(QMainWindow):
         self.txt_move_x.setText(str(self.job_state.img_move_x_mm))
         self.txt_move_y.setText(str(self.job_state.img_move_y_mm))
 
+    def _get_centered_image_origin(self, width_mm: float, height_mm: float) -> tuple[int, int]:
+        return (
+            max(int(round((self.settings.machine_profile.canvas_width_mm - width_mm) / 2)), 0),
+            max(int(round((self.settings.machine_profile.canvas_height_mm - height_mm) / 2)), 0),
+        )
+
     def _on_select_image(self) -> None:
         selected_file, _ = QFileDialog.getOpenFileName(
             self,
@@ -404,13 +414,9 @@ class MainWindow(QMainWindow):
         self.job_state.image_dpi = metadata.dpi_x
 
         if self.job_state.retained_image is None:
-            self.job_state.img_move_x_mm = max(
-                int((self.settings.machine_profile.canvas_width_mm - metadata.image_width_mm) / 2),
-                0,
-            )
-            self.job_state.img_move_y_mm = max(
-                int((self.settings.machine_profile.canvas_height_mm - metadata.image_height_mm) / 2),
-                0,
+            self.job_state.img_move_x_mm, self.job_state.img_move_y_mm = self._get_centered_image_origin(
+                metadata.image_width_mm,
+                metadata.image_height_mm,
             )
         else:
             self.job_state.img_move_x_mm = self.job_state.retained_image.move_x_mm
@@ -454,16 +460,21 @@ class MainWindow(QMainWindow):
             self.job_state.img_move_y_mm = 0
             self.btn_center_img.setText("Center image")
         else:
-            self.job_state.img_move_x_mm = max(
-                int((self.settings.machine_profile.canvas_width_mm - self.job_state.image_width_mm) / 2),
-                0,
-            )
-            self.job_state.img_move_y_mm = max(
-                int((self.settings.machine_profile.canvas_height_mm - self.job_state.image_height_mm) / 2),
-                0,
+            self.job_state.img_move_x_mm, self.job_state.img_move_y_mm = self._get_centered_image_origin(
+                self.job_state.image_width_mm,
+                self.job_state.image_height_mm,
             )
             self.btn_center_img.setText("Move top left")
         self._render_image_preview()
+
+    def _on_motor_power_commands_toggled(self, checked: bool) -> None:
+        self.settings.motor_power_commands_enabled = checked
+        self.settings_store.save(self.settings)
+        if checked:
+            self._append_log("Motor power commands enabled (M17/M18).")
+        else:
+            self._append_log("Motor power commands disabled for legacy controller mode.")
+        self._update_ui_state()
 
     def _on_clear_image(self) -> None:
         self.job_state.clear_image()
@@ -877,8 +888,9 @@ class MainWindow(QMainWindow):
         connected_controls = usb_connected and not stream_active and not self._manual_busy
         self.txt_serial_cmd.setEnabled(connected_controls)
         self.btn_send_cmd.setEnabled(connected_controls)
-        self.btn_enable_stepper.setEnabled(connected_controls)
-        self.btn_disable_stepper.setEnabled(connected_controls)
+        motor_power_controls = connected_controls and self.settings.motor_power_commands_enabled
+        self.btn_enable_stepper.setEnabled(motor_power_controls)
+        self.btn_disable_stepper.setEnabled(motor_power_controls)
         self.btn_pen_touch.setEnabled(connected_controls)
         self.btn_pen_away.setEnabled(connected_controls)
         self.btn_home.setEnabled(connected_controls)
