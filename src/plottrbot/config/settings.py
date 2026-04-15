@@ -8,11 +8,32 @@ from platformdirs import user_config_dir
 
 from plottrbot.core.models import MachineProfile
 
+LEGACY_END_GCODE_LINES = ("G1 Z1", "G28")
+DEFAULT_END_PARK_Y_MM = 800
+
+
+def _format_mm(value: float) -> str:
+    text = f"{value:.3f}".rstrip("0").rstrip(".")
+    if text == "-0":
+        return "0"
+    return text
+
+
+def default_end_gcode_lines(profile: MachineProfile) -> list[str]:
+    return ["G1 Z1", f"G1 X{_format_mm(profile.home_x_mm)} Y{DEFAULT_END_PARK_Y_MM}"]
+
+
+def uses_builtin_end_gcode(lines: list[str], profile: MachineProfile) -> bool:
+    normalized = [str(line).strip() for line in lines if str(line).strip()]
+    return normalized == list(LEGACY_END_GCODE_LINES) or normalized == default_end_gcode_lines(profile)
+
 
 @dataclass(slots=True)
 class AppSettings:
     machine_profile: MachineProfile = field(default_factory=MachineProfile)
-    end_gcode_lines: list[str] = field(default_factory=lambda: ["G1 Z1", "G28"])
+    end_gcode_lines: list[str] = field(
+        default_factory=lambda: default_end_gcode_lines(MachineProfile())
+    )
     motor_power_commands_enabled: bool = True
     last_port: str = ""
     window_width: int = 1600
@@ -49,10 +70,13 @@ class SettingsStore:
             ack_token=str(profile_raw.get("ack_token", "GO")),
             ack_timeout_seconds=float(profile_raw.get("ack_timeout_seconds", 60.0)),
         )
-        end_gcode_raw = raw.get("end_gcode_lines", ["G1 Z1", "G28"])
-        end_gcode = [str(line).strip() for line in end_gcode_raw if str(line).strip()]
-        if not end_gcode:
-            end_gcode = ["G1 Z1", "G28"]
+        end_gcode_raw = raw.get("end_gcode_lines")
+        if end_gcode_raw is None:
+            end_gcode = default_end_gcode_lines(profile)
+        else:
+            end_gcode = [str(line).strip() for line in end_gcode_raw if str(line).strip()]
+            if not end_gcode or end_gcode == list(LEGACY_END_GCODE_LINES):
+                end_gcode = default_end_gcode_lines(profile)
 
         return AppSettings(
             machine_profile=profile,

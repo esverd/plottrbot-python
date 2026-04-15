@@ -7,6 +7,7 @@ import time
 from PIL import Image
 from PySide6.QtWidgets import QMessageBox
 
+from plottrbot.config.settings import default_end_gcode_lines
 from plottrbot.serial.nano_transport import AckResult
 from plottrbot.serial.program_streamer import SendSessionState, SendStatus
 from plottrbot.ui.main_window import MainWindow
@@ -362,6 +363,61 @@ def test_load_bmp_uses_default_dpi_override(qtbot, settings_store, tmp_path: Pat
     assert window.job_state.dpi_override == 35
     assert int(round(window.job_state.image_dpi)) == 35
     assert window.txt_dpi.text() == "35"
+
+
+def test_legacy_end_gcode_defaults_migrate_to_center_park(qtbot, settings_store) -> None:
+    settings = settings_store.load()
+    settings.end_gcode_lines = ["G1 Z1", "G28"]
+    settings_store.save(settings)
+
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    assert window._current_end_gcode_lines() == ["G1 Z1", "G1 X730 Y800"]
+
+
+def test_slice_uses_center_park_end_gcode_by_default(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+
+    assert window.job_state.gcode[-2:] == ["G1 Z1", "G1 X730 Y800"]
+
+
+def test_save_dimensions_updates_builtin_end_park_x(qtbot, settings_store, monkeypatch) -> None:
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    window.txt_robot_width.setText("1200")
+    window.txt_robot_height.setText("900")
+    window._on_save_dimensions()
+
+    assert window._current_end_gcode_lines() == default_end_gcode_lines(window.settings.machine_profile)
+    assert window._current_end_gcode_lines() == ["G1 Z1", "G1 X600 Y800"]
 
 
 def test_motor_power_buttons_follow_saved_setting(qtbot, settings_store) -> None:

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from plottrbot.config.settings import AppSettings, SettingsStore
+from plottrbot.config.settings import SettingsStore, default_end_gcode_lines, uses_builtin_end_gcode
 from plottrbot.core.bmp_converter import BmpConverter
 from plottrbot.core.models import JobState, RetainedImage
 from plottrbot.core.state_machine import UiState, derive_ui_state
@@ -346,6 +346,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid value", f"{field_name} must be an integer.")
             return None
 
+    def _current_end_gcode_lines(self) -> list[str]:
+        return [line.strip() for line in self.txt_end_gcode.toPlainText().splitlines() if line.strip()]
+
     def _render_retained_overlay(self) -> None:
         retained = self.job_state.retained_image
         if retained is None:
@@ -533,9 +536,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No image", "Load a BMP image first.")
             return
 
-        end_gcode_lines = [line.strip() for line in self.txt_end_gcode.toPlainText().splitlines() if line.strip()]
+        end_gcode_lines = self._current_end_gcode_lines()
         if not end_gcode_lines:
-            end_gcode_lines = ["G1 Z1", "G28"]
+            end_gcode_lines = default_end_gcode_lines(self.settings.machine_profile)
 
         result = self.converter.generate(
             image_path=self.job_state.loaded_file,
@@ -820,11 +823,24 @@ class MainWindow(QMainWindow):
             return
 
         profile = self.settings.machine_profile
+        previous_profile = type(profile)(
+            canvas_width_mm=profile.canvas_width_mm,
+            canvas_height_mm=profile.canvas_height_mm,
+            home_x_mm=profile.home_x_mm,
+            home_y_mm=profile.home_y_mm,
+            baudrate=profile.baudrate,
+            ack_token=profile.ack_token,
+            ack_timeout_seconds=profile.ack_timeout_seconds,
+        )
+        should_refresh_end_gcode = uses_builtin_end_gcode(self._current_end_gcode_lines(), previous_profile)
         profile.canvas_width_mm = width
         profile.canvas_height_mm = height
         profile.home_x_mm = width / 2.0
         self.converter.machine_profile = profile
         self.preview_canvas.set_machine_profile(profile)
+        if should_refresh_end_gcode:
+            self.settings.end_gcode_lines = default_end_gcode_lines(profile)
+            self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")
         self.settings_store.save(self.settings)
         QMessageBox.information(self, "Saved", "Dimensions saved.")
 
@@ -927,7 +943,7 @@ class MainWindow(QMainWindow):
         self.settings.window_height = self.height()
         self.settings.end_gcode_lines = [
             line.strip() for line in self.txt_end_gcode.toPlainText().splitlines() if line.strip()
-        ] or ["G1 Z1", "G28"]
+        ] or default_end_gcode_lines(self.settings.machine_profile)
         self.settings_store.save(self.settings)
         self.streamer.reset()
         self._wait_for_manual_worker()
