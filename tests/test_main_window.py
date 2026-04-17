@@ -885,3 +885,61 @@ def test_halftone_preview_toggle_does_not_change_export_bmp(qtbot, settings_stor
     after = export_path.read_bytes()
 
     assert before == after
+
+
+def test_image_prep_dpi_change_updates_render_resolution_with_fixed_dimensions(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "dpi_effect.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    window.spin_prep_width_mm.setValue(200.0)
+    window.spin_prep_height_mm.setValue(200.0)
+    low_width_px = window.image_prep_state.artifacts.image_width_px if window.image_prep_state.artifacts else 0
+
+    window.spin_prep_dpi.setValue(70)
+    high_width_px = window.image_prep_state.artifacts.image_width_px if window.image_prep_state.artifacts else 0
+
+    assert high_width_px > low_width_px
+
+
+def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
+    window.tab_control.setCurrentWidget(window.control_tab)
+    assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
+    window.tab_control.setCurrentWidget(window.image_prep_tab)
+    assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
+
+    jpg_path = tmp_path / "toast.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+    window._on_prep_save_bmp()
+
+    assert "Saved BMP:" in window.statusBar().currentMessage()

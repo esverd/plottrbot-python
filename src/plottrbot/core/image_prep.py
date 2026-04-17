@@ -139,6 +139,8 @@ def is_supported_source_image(image_path: Path) -> bool:
 @dataclass(slots=True)
 class ImagePrepSettings:
     dpi: int = 35
+    target_width_mm: float = 0.0
+    target_height_mm: float = 0.0
     blur_radius: float = 0.0
     levels: int = 4
     strategy: PrepStrategy = "banded"
@@ -151,11 +153,15 @@ class ImagePrepSettings:
         strategy = "relative" if self.strategy == "relative" else "banded"
         levels = _clamp(int(round(self.levels)), MIN_LEVELS, MAX_LEVELS)
         dpi = max(1, int(round(self.dpi)))
+        target_width_mm = max(0.0, float(self.target_width_mm))
+        target_height_mm = max(0.0, float(self.target_height_mm))
         blur_radius = max(0.0, float(self.blur_radius))
         auto_thresholds = bool(self.auto_thresholds)
         manual_thresholds = normalize_thresholds(self.manual_thresholds, levels=levels)
         return ImagePrepSettings(
             dpi=dpi,
+            target_width_mm=target_width_mm,
+            target_height_mm=target_height_mm,
             blur_radius=blur_radius,
             levels=levels,
             strategy=strategy,
@@ -173,6 +179,8 @@ class ImagePrepSettings:
     def to_dict(self) -> dict[str, Any]:
         return {
             "dpi": int(self.dpi),
+            "target_width_mm": float(self.target_width_mm),
+            "target_height_mm": float(self.target_height_mm),
             "blur_radius": float(self.blur_radius),
             "levels": int(self.levels),
             "strategy": self.strategy,
@@ -187,6 +195,8 @@ class ImagePrepSettings:
         strategy: PrepStrategy = "relative" if strategy_value == "relative" else "banded"
         settings = cls(
             dpi=max(1, _coerce_int(payload.get("dpi"), 35)),
+            target_width_mm=max(0.0, _coerce_float(payload.get("target_width_mm"), 0.0)),
+            target_height_mm=max(0.0, _coerce_float(payload.get("target_height_mm"), 0.0)),
             blur_radius=max(0.0, _coerce_float(payload.get("blur_radius"), 0.0)),
             levels=_clamp(_coerce_int(payload.get("levels"), 4), MIN_LEVELS, MAX_LEVELS),
             strategy=strategy,
@@ -294,6 +304,19 @@ def process_image_for_prep(
         grayscale = source.convert("L")
         if sanitized.blur_radius > 0.0:
             grayscale = grayscale.filter(ImageFilter.GaussianBlur(radius=sanitized.blur_radius))
+        source_width_px, source_height_px = grayscale.size
+
+        source_width_mm = (source_width_px / sanitized.dpi) * 25.4
+        source_height_mm = (source_height_px / sanitized.dpi) * 25.4
+
+        target_width_mm = sanitized.target_width_mm if sanitized.target_width_mm > 0.0 else source_width_mm
+        target_height_mm = sanitized.target_height_mm if sanitized.target_height_mm > 0.0 else source_height_mm
+
+        target_width_px = max(1, int(round((target_width_mm / 25.4) * sanitized.dpi)))
+        target_height_px = max(1, int(round((target_height_mm / 25.4) * sanitized.dpi)))
+        if (target_width_px, target_height_px) != grayscale.size:
+            grayscale = grayscale.resize((target_width_px, target_height_px), Image.Resampling.BILINEAR)
+
         width, height = grayscale.size
         values = list(grayscale.tobytes())
 
@@ -319,6 +342,8 @@ def process_image_for_prep(
 
     width_mm = (width / sanitized.dpi) * 25.4
     height_mm = (height / sanitized.dpi) * 25.4
+    sanitized.target_width_mm = width_mm
+    sanitized.target_height_mm = height_mm
 
     if not sanitized.auto_thresholds:
         sanitized.manual_thresholds = list(thresholds)

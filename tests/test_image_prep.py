@@ -110,3 +110,33 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
     assert loaded_export is not None
     assert loaded_export.resolve() == export_bmp_path.resolve()
     assert loaded_settings.to_dict() == sanitized.to_dict()
+
+
+def test_dimensions_and_dpi_control_processed_resolution(tmp_path: Path) -> None:
+    image_path = tmp_path / "sized.jpg"
+    _create_gradient_jpg(image_path, width=100, height=60)
+
+    low_dpi = ImagePrepSettings(
+        dpi=50,
+        target_width_mm=50.8,
+        target_height_mm=25.4,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=True,
+    )
+    high_dpi = ImagePrepSettings(
+        dpi=100,
+        target_width_mm=50.8,
+        target_height_mm=25.4,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=True,
+    )
+
+    _, low_artifacts = process_image_for_prep(image_path=image_path, settings=low_dpi)
+    _, high_artifacts = process_image_for_prep(image_path=image_path, settings=high_dpi)
+
+    assert low_artifacts.image_width_mm == high_artifacts.image_width_mm
+    assert low_artifacts.image_height_mm == high_artifacts.image_height_mm
+    assert high_artifacts.image_width_px > low_artifacts.image_width_px
+    assert high_artifacts.image_height_px > low_artifacts.image_height_px

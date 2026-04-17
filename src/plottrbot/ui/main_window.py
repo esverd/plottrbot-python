@@ -6,7 +6,7 @@ import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QSlider,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
         self.job_state = JobState(preview_scale=0.8)
         self.image_prep_state = ImagePrepState()
         self._prep_updating_controls = False
+        self._prep_preview_full_pixmap = QPixmap()
 
         self.converter = converter or BmpConverter(self.settings.machine_profile)
         self.bridge = UiBridge()
@@ -158,13 +160,36 @@ class MainWindow(QMainWindow):
         self._build_control_tab()
         self._build_advanced_tab()
 
+        self.prep_preview_label = QLabel("Load a JPG to begin.")
+        self.prep_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.prep_preview_label.setMinimumSize(1, 1)
+        self.prep_preview_scroll = QScrollArea()
+        self.prep_preview_scroll.setWidgetResizable(True)
+        self.prep_preview_scroll.setWidget(self.prep_preview_label)
+        self.prep_preview_scroll.viewport().installEventFilter(self)
+
         self.preview_canvas = PreviewCanvas(self.settings.machine_profile)
         self.preview_canvas.set_scale(self.job_state.preview_scale)
 
         self.preview_scroll = QScrollArea()
         self.preview_scroll.setWidgetResizable(False)
         self.preview_scroll.setWidget(self.preview_canvas)
-        layout.addWidget(self.preview_scroll, 1)
+
+        self.machine_preview_panel = QWidget()
+        machine_preview_layout = QVBoxLayout(self.machine_preview_panel)
+        machine_preview_layout.setContentsMargins(0, 0, 0, 0)
+        machine_preview_layout.addWidget(self.preview_scroll)
+
+        self.prep_preview_panel = QWidget()
+        prep_preview_layout = QVBoxLayout(self.prep_preview_panel)
+        prep_preview_layout.setContentsMargins(0, 0, 0, 0)
+        prep_preview_layout.addWidget(self.prep_preview_scroll)
+
+        self.right_preview_stack = QStackedWidget()
+        self.right_preview_stack.addWidget(self.prep_preview_panel)
+        self.right_preview_stack.addWidget(self.machine_preview_panel)
+        layout.addWidget(self.right_preview_stack, 1)
+        self._sync_right_preview_panel()
 
     def _build_image_prep_tab(self) -> None:
         layout = QVBoxLayout(self.image_prep_tab)
@@ -199,41 +224,61 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(QLabel("DPI"), 0, 0)
         controls_layout.addWidget(self.spin_prep_dpi, 0, 1)
 
+        self.spin_prep_width_mm = QDoubleSpinBox()
+        self.spin_prep_width_mm.setRange(1.0, 10000.0)
+        self.spin_prep_width_mm.setSingleStep(1.0)
+        self.spin_prep_width_mm.setDecimals(1)
+        self.spin_prep_width_mm.setValue(100.0)
+        controls_layout.addWidget(QLabel("Width [mm]"), 0, 2)
+        controls_layout.addWidget(self.spin_prep_width_mm, 0, 3)
+
         self.spin_prep_blur = QDoubleSpinBox()
         self.spin_prep_blur.setRange(0.0, 10.0)
         self.spin_prep_blur.setSingleStep(0.1)
         self.spin_prep_blur.setDecimals(1)
         self.spin_prep_blur.setValue(0.0)
-        controls_layout.addWidget(QLabel("Gaussian blur"), 0, 2)
-        controls_layout.addWidget(self.spin_prep_blur, 0, 3)
+        controls_layout.addWidget(QLabel("Gaussian blur"), 1, 0)
+        controls_layout.addWidget(self.spin_prep_blur, 1, 1)
+
+        self.spin_prep_height_mm = QDoubleSpinBox()
+        self.spin_prep_height_mm.setRange(1.0, 10000.0)
+        self.spin_prep_height_mm.setSingleStep(1.0)
+        self.spin_prep_height_mm.setDecimals(1)
+        self.spin_prep_height_mm.setValue(100.0)
+        controls_layout.addWidget(QLabel("Height [mm]"), 1, 2)
+        controls_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
         self.spin_prep_levels = QSpinBox()
         self.spin_prep_levels.setRange(2, 8)
         self.spin_prep_levels.setValue(4)
-        controls_layout.addWidget(QLabel("Levels"), 1, 0)
-        controls_layout.addWidget(self.spin_prep_levels, 1, 1)
+        controls_layout.addWidget(QLabel("Levels"), 2, 0)
+        controls_layout.addWidget(self.spin_prep_levels, 2, 1)
 
         self.combo_prep_strategy = QComboBox()
         self.combo_prep_strategy.addItems(["banded", "relative"])
-        controls_layout.addWidget(QLabel("Threshold strategy"), 1, 2)
-        controls_layout.addWidget(self.combo_prep_strategy, 1, 3)
+        controls_layout.addWidget(QLabel("Threshold strategy"), 2, 2)
+        controls_layout.addWidget(self.combo_prep_strategy, 2, 3)
+
+        self.checkbox_prep_lock_aspect = QCheckBox("Lock aspect ratio")
+        self.checkbox_prep_lock_aspect.setChecked(True)
+        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 3, 0, 1, 2)
 
         self.checkbox_prep_auto_thresholds = QCheckBox("Use auto thresholds")
         self.checkbox_prep_auto_thresholds.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 2, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 3, 2, 1, 2)
 
         self.checkbox_prep_halftone_preview = QCheckBox("Show halftone preview")
         self.checkbox_prep_halftone_preview.setChecked(False)
-        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 2, 2, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 4, 0, 1, 2)
 
-        controls_layout.addWidget(QLabel("Manual thresholds"), 3, 0)
+        controls_layout.addWidget(QLabel("Manual thresholds"), 5, 0)
         self.txt_prep_manual_thresholds = QLineEdit("")
         self.txt_prep_manual_thresholds.setPlaceholderText("e.g. 64,128,192")
-        controls_layout.addWidget(self.txt_prep_manual_thresholds, 3, 1, 1, 3)
+        controls_layout.addWidget(self.txt_prep_manual_thresholds, 5, 1, 1, 3)
 
         self.lbl_prep_effective_thresholds = QLabel("Effective thresholds: n/a")
         self.lbl_prep_effective_thresholds.setWordWrap(True)
-        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 4, 0, 1, 4)
+        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 6, 0, 1, 4)
         layout.addWidget(controls_group)
 
         action_row = QHBoxLayout()
@@ -243,17 +288,10 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.btn_prep_apply_to_control)
         layout.addLayout(action_row)
 
-        preview_group = QGroupBox("Prep preview")
-        preview_layout = QVBoxLayout(preview_group)
-        self.prep_preview_label = QLabel("Load a JPG to begin.")
-        self.prep_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.prep_preview_label.setMinimumHeight(320)
-
-        self.prep_preview_scroll = QScrollArea()
-        self.prep_preview_scroll.setWidgetResizable(True)
-        self.prep_preview_scroll.setWidget(self.prep_preview_label)
-        preview_layout.addWidget(self.prep_preview_scroll)
-        layout.addWidget(preview_group, 1)
+        prep_note = QLabel("Preview is shown on the right canvas while this tab is active.")
+        prep_note.setWordWrap(True)
+        layout.addWidget(prep_note)
+        layout.addStretch(1)
 
     def _build_control_tab(self) -> None:
         layout = QVBoxLayout(self.control_tab)
@@ -450,15 +488,19 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
     def _connect_signals(self) -> None:
+        self.tab_control.currentChanged.connect(self._on_tab_changed)
         self.btn_prep_load_jpg.clicked.connect(self._on_prep_load_jpg)
         self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
         self.btn_prep_save_sidecar.clicked.connect(self._on_prep_save_sidecar)
         self.btn_prep_save_bmp.clicked.connect(self._on_prep_save_bmp)
         self.btn_prep_apply_to_control.clicked.connect(self._on_prep_apply_to_control)
         self.spin_prep_dpi.valueChanged.connect(self._on_prep_settings_changed)
+        self.spin_prep_width_mm.valueChanged.connect(self._on_prep_dimension_changed)
+        self.spin_prep_height_mm.valueChanged.connect(self._on_prep_dimension_changed)
         self.spin_prep_blur.valueChanged.connect(self._on_prep_settings_changed)
         self.spin_prep_levels.valueChanged.connect(self._on_prep_settings_changed)
         self.combo_prep_strategy.currentTextChanged.connect(self._on_prep_settings_changed)
+        self.checkbox_prep_lock_aspect.toggled.connect(self._on_prep_settings_changed)
         self.checkbox_prep_auto_thresholds.toggled.connect(self._on_prep_auto_thresholds_toggled)
         self.txt_prep_manual_thresholds.editingFinished.connect(self._on_prep_settings_changed)
         self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
@@ -525,11 +567,48 @@ class MainWindow(QMainWindow):
         self.btn_pause_drawing.setText("Pause drawing")
         self._append_log("Ready")
 
+    def _show_toast(self, message: str, timeout_ms: int = 2200) -> None:
+        self.statusBar().showMessage(message, timeout_ms)
+
+    def _sync_right_preview_panel(self) -> None:
+        is_prep_tab = self.tab_control.currentWidget() is self.image_prep_tab
+        self.right_preview_stack.setCurrentWidget(
+            self.prep_preview_panel if is_prep_tab else self.machine_preview_panel
+        )
+        if is_prep_tab:
+            self._update_prep_preview_fit()
+
+    def _on_tab_changed(self, _index: int) -> None:
+        self._sync_right_preview_panel()
+
+    def _update_prep_preview_fit(self) -> None:
+        if self._prep_preview_full_pixmap.isNull():
+            return
+        viewport_size = self.prep_preview_scroll.viewport().size()
+        if viewport_size.width() <= 1 or viewport_size.height() <= 1:
+            return
+        fitted = self._prep_preview_full_pixmap.scaled(
+            viewport_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.prep_preview_label.setPixmap(fitted)
+        self.prep_preview_label.resize(fitted.size())
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.prep_preview_scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._update_prep_preview_fit()
+        return super().eventFilter(watched, event)
+
     def _sync_prep_controls_from_state(self) -> None:
         settings = self.image_prep_state.settings.sanitized()
         self.image_prep_state.settings = settings
         self._prep_updating_controls = True
         self.spin_prep_dpi.setValue(settings.dpi)
+        width_mm = settings.target_width_mm if settings.target_width_mm > 0.0 else 100.0
+        height_mm = settings.target_height_mm if settings.target_height_mm > 0.0 else 100.0
+        self.spin_prep_width_mm.setValue(width_mm)
+        self.spin_prep_height_mm.setValue(height_mm)
         self.spin_prep_blur.setValue(settings.blur_radius)
         self.spin_prep_levels.setValue(settings.levels)
         self.combo_prep_strategy.setCurrentText(settings.strategy)
@@ -553,6 +632,8 @@ class MainWindow(QMainWindow):
             manual_thresholds = parse_threshold_text(self.txt_prep_manual_thresholds.text())
         settings = ImagePrepSettings(
             dpi=self.spin_prep_dpi.value(),
+            target_width_mm=self.spin_prep_width_mm.value(),
+            target_height_mm=self.spin_prep_height_mm.value(),
             blur_radius=self.spin_prep_blur.value(),
             levels=self.spin_prep_levels.value(),
             strategy=self.combo_prep_strategy.currentText().strip().lower(),
@@ -595,6 +676,7 @@ class MainWindow(QMainWindow):
     def _render_prep_preview(self) -> None:
         artifacts = self.image_prep_state.artifacts
         if artifacts is None:
+            self._prep_preview_full_pixmap = QPixmap()
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Load a JPG to begin.")
             return
@@ -606,12 +688,13 @@ class MainWindow(QMainWindow):
         )
         pixmap = self._pil_image_to_pixmap(preview_image)
         if pixmap.isNull():
+            self._prep_preview_full_pixmap = QPixmap()
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Preview unavailable.")
             return
+        self._prep_preview_full_pixmap = pixmap
         self.prep_preview_label.setText("")
-        self.prep_preview_label.setPixmap(pixmap)
-        self.prep_preview_label.resize(pixmap.size())
+        self._update_prep_preview_fit()
 
     def _recompute_prep_artifacts(self, *, mark_dirty: bool) -> bool:
         source = self.image_prep_state.source_image_path
@@ -705,6 +788,7 @@ class MainWindow(QMainWindow):
                 self.job_state.image_dpi = metadata.dpi_x
                 self._render_image_preview()
         self._append_log(f"Saved processed BMP: {output_path}")
+        self._show_toast(f"Saved BMP: {output_path.name}")
         return output_path
 
     def _refresh_linked_prep_bmp_for_slice(self) -> bool:
@@ -843,6 +927,53 @@ class MainWindow(QMainWindow):
         )
         self.tab_control.setCurrentWidget(self.control_tab)
         self._append_log("Applied processed image to Control tab.")
+
+    def _on_prep_dimension_changed(self, *_args: object) -> None:
+        if self._prep_updating_controls:
+            return
+        if not self.checkbox_prep_lock_aspect.isChecked():
+            self._on_prep_settings_changed()
+            return
+
+        sender = self.sender()
+        if sender not in {self.spin_prep_width_mm, self.spin_prep_height_mm}:
+            self._on_prep_settings_changed()
+            return
+
+        current_width = self.spin_prep_width_mm.value()
+        current_height = self.spin_prep_height_mm.value()
+        if current_width <= 0.0 or current_height <= 0.0:
+            self._on_prep_settings_changed()
+            return
+
+        aspect_ratio: float | None = None
+        if (
+            self.image_prep_state.settings.target_width_mm > 0.0
+            and self.image_prep_state.settings.target_height_mm > 0.0
+        ):
+            aspect_ratio = (
+                self.image_prep_state.settings.target_width_mm
+                / self.image_prep_state.settings.target_height_mm
+            )
+        elif self.image_prep_state.artifacts is not None and self.image_prep_state.artifacts.image_height_mm > 0.0:
+            aspect_ratio = (
+                self.image_prep_state.artifacts.image_width_mm
+                / self.image_prep_state.artifacts.image_height_mm
+            )
+
+        if aspect_ratio is None or aspect_ratio <= 0.0:
+            self._on_prep_settings_changed()
+            return
+
+        self._prep_updating_controls = True
+        if sender is self.spin_prep_width_mm:
+            new_height = max(1.0, current_width / aspect_ratio)
+            self.spin_prep_height_mm.setValue(new_height)
+        else:
+            new_width = max(1.0, current_height * aspect_ratio)
+            self.spin_prep_width_mm.setValue(new_width)
+        self._prep_updating_controls = False
+        self._on_prep_settings_changed()
 
     def _on_prep_settings_changed(self, *_args: object) -> None:
         if self._prep_updating_controls:
@@ -1662,6 +1793,9 @@ class MainWindow(QMainWindow):
         self.btn_prep_save_bmp.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
         self.spin_prep_dpi.setEnabled(prep_has_source and prep_controls_enabled)
+        self.spin_prep_width_mm.setEnabled(prep_has_source and prep_controls_enabled)
+        self.spin_prep_height_mm.setEnabled(prep_has_source and prep_controls_enabled)
+        self.checkbox_prep_lock_aspect.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_blur.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_levels.setEnabled(prep_has_source and prep_controls_enabled)
         self.combo_prep_strategy.setEnabled(prep_has_source and prep_controls_enabled)
