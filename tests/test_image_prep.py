@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 from plottrbot.core.image_prep import (
@@ -140,3 +141,19 @@ def test_dimensions_and_dpi_control_processed_resolution(tmp_path: Path) -> None
     assert low_artifacts.image_height_mm == high_artifacts.image_height_mm
     assert high_artifacts.image_width_px > low_artifacts.image_width_px
     assert high_artifacts.image_height_px > low_artifacts.image_height_px
+
+
+def test_overly_large_prep_render_is_rejected(tmp_path: Path) -> None:
+    image_path = tmp_path / "large_guard.jpg"
+    _create_gradient_jpg(image_path, width=120, height=120)
+
+    settings = ImagePrepSettings(
+        dpi=1200,
+        target_width_mm=1460.0,
+        target_height_mm=1000.0,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=True,
+    )
+    with pytest.raises(ValueError, match="too large"):
+        process_image_for_prep(image_path=image_path, settings=settings)

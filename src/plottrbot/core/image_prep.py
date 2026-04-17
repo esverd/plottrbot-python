@@ -16,6 +16,8 @@ MIN_THRESHOLD = 5
 MAX_THRESHOLD = 250
 MIN_THRESHOLD_GAP = 8
 SIDECAR_SCHEMA_VERSION = 1
+MAX_RENDER_SIDE_PX = 12000
+MAX_RENDER_PIXELS = 36_000_000
 
 
 def _utc_now_iso() -> str:
@@ -314,6 +316,16 @@ def process_image_for_prep(
 
         target_width_px = max(1, int(round((target_width_mm / 25.4) * sanitized.dpi)))
         target_height_px = max(1, int(round((target_height_mm / 25.4) * sanitized.dpi)))
+        if (
+            target_width_px > MAX_RENDER_SIDE_PX
+            or target_height_px > MAX_RENDER_SIDE_PX
+            or (target_width_px * target_height_px) > MAX_RENDER_PIXELS
+        ):
+            raise ValueError(
+                "Requested prep render is too large. "
+                f"Current target resolves to {target_width_px}x{target_height_px}px. "
+                "Reduce dimensions or DPI."
+            )
         if (target_width_px, target_height_px) != grayscale.size:
             grayscale = grayscale.resize((target_width_px, target_height_px), Image.Resampling.BILINEAR)
 

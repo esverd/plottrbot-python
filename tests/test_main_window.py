@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import time
 
+import pytest
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -142,6 +143,15 @@ def _create_simple_jpg(path: Path) -> None:
     for x in range(20):
         shade = int(round((x / 19.0) * 255))
         for y in range(20):
+            image.putpixel((x, y), (shade, shade, shade))
+    image.save(path, format="JPEG")
+
+
+def _create_rect_jpg(path: Path, *, width: int, height: int) -> None:
+    image = Image.new("RGB", (width, height), color=(255, 255, 255))
+    for x in range(width):
+        shade = int(round((x / max(width - 1, 1)) * 255))
+        for y in range(height):
             image.putpixel((x, y), (shade, shade, shade))
     image.save(path, format="JPEG")
 
@@ -885,6 +895,61 @@ def test_halftone_preview_toggle_does_not_change_export_bmp(qtbot, settings_stor
     after = export_path.read_bytes()
 
     assert before == after
+
+
+def test_image_prep_default_dimensions_use_400mm_long_side(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "default_dims.jpg"
+    _create_rect_jpg(jpg_path, width=80, height=40)
+
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    assert window.spin_prep_width_mm.value() == pytest.approx(400.0, abs=0.5)
+    assert window.spin_prep_height_mm.value() == pytest.approx(200.0, abs=0.5)
+
+
+def test_image_prep_dimensions_are_clamped_to_robot_limits(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "clamp_dims.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    window.checkbox_prep_lock_aspect.setChecked(False)
+    window.spin_prep_width_mm.setValue(5000.0)
+    window.spin_prep_height_mm.setValue(5000.0)
+
+    max_width = float(window.settings.machine_profile.canvas_width_mm)
+    max_height = float(window.settings.machine_profile.canvas_height_mm)
+
+    assert window.spin_prep_width_mm.value() == pytest.approx(max_width, abs=0.01)
+    assert window.spin_prep_height_mm.value() == pytest.approx(max_height, abs=0.01)
+    assert window.image_prep_state.artifacts is not None
+    assert window.image_prep_state.artifacts.image_width_mm <= max_width + 0.2
+    assert window.image_prep_state.artifacts.image_height_mm <= max_height + 0.2
 
 
 def test_image_prep_dpi_change_updates_render_resolution_with_fixed_dimensions(

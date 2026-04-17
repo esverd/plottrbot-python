@@ -288,9 +288,6 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.btn_prep_apply_to_control)
         layout.addLayout(action_row)
 
-        prep_note = QLabel("Preview is shown on the right canvas while this tab is active.")
-        prep_note.setWordWrap(True)
-        layout.addWidget(prep_note)
         layout.addStretch(1)
 
     def _build_control_tab(self) -> None:
@@ -570,6 +567,65 @@ class MainWindow(QMainWindow):
     def _show_toast(self, message: str, timeout_ms: int = 2200) -> None:
         self.statusBar().showMessage(message, timeout_ms)
 
+    def _machine_prep_limits(self) -> tuple[float, float]:
+        max_width = float(max(1, int(self.settings.machine_profile.canvas_width_mm)))
+        max_height = float(max(1, int(self.settings.machine_profile.canvas_height_mm)))
+        return max_width, max_height
+
+    def _default_target_dimensions_for_source(self, image_path: Path, *, long_side_mm: float = 400.0) -> tuple[float, float]:
+        with Image.open(image_path) as image:
+            width_px, height_px = image.size
+        if width_px <= 0 or height_px <= 0:
+            return 400.0, 400.0
+
+        long_side = max(1.0, float(long_side_mm))
+        if width_px >= height_px:
+            width_mm = long_side
+            height_mm = long_side * (height_px / width_px)
+        else:
+            height_mm = long_side
+            width_mm = long_side * (width_px / height_px)
+
+        max_width, max_height = self._machine_prep_limits()
+        scale = min(1.0, max_width / max(width_mm, 1e-9), max_height / max(height_mm, 1e-9))
+        return max(1.0, width_mm * scale), max(1.0, height_mm * scale)
+
+    def _clamp_prep_dimensions_to_machine(
+        self,
+        *,
+        width_mm: float,
+        height_mm: float,
+    ) -> tuple[float, float, bool]:
+        max_width, max_height = self._machine_prep_limits()
+        clamped_width = max(1.0, min(float(width_mm), max_width))
+        clamped_height = max(1.0, min(float(height_mm), max_height))
+        changed = (
+            abs(clamped_width - float(width_mm)) > 1e-9
+            or abs(clamped_height - float(height_mm)) > 1e-9
+        )
+        return clamped_width, clamped_height, changed
+
+    def _sanitize_prep_settings_for_machine(self, settings: ImagePrepSettings) -> tuple[ImagePrepSettings, bool]:
+        sanitized = settings.sanitized()
+        width_mm, height_mm, clamped = self._clamp_prep_dimensions_to_machine(
+            width_mm=sanitized.target_width_mm,
+            height_mm=sanitized.target_height_mm,
+        )
+        sanitized.target_width_mm = width_mm
+        sanitized.target_height_mm = height_mm
+        return sanitized, clamped
+
+    def _update_prep_dimension_spin_limits(self) -> None:
+        max_width, max_height = self._machine_prep_limits()
+        self._prep_updating_controls = True
+        self.spin_prep_width_mm.setRange(1.0, max_width)
+        self.spin_prep_height_mm.setRange(1.0, max_height)
+        if self.spin_prep_width_mm.value() > max_width:
+            self.spin_prep_width_mm.setValue(max_width)
+        if self.spin_prep_height_mm.value() > max_height:
+            self.spin_prep_height_mm.setValue(max_height)
+        self._prep_updating_controls = False
+
     def _sync_right_preview_panel(self) -> None:
         is_prep_tab = self.tab_control.currentWidget() is self.image_prep_tab
         self.right_preview_stack.setCurrentWidget(
@@ -603,10 +659,11 @@ class MainWindow(QMainWindow):
     def _sync_prep_controls_from_state(self) -> None:
         settings = self.image_prep_state.settings.sanitized()
         self.image_prep_state.settings = settings
+        self._update_prep_dimension_spin_limits()
         self._prep_updating_controls = True
         self.spin_prep_dpi.setValue(settings.dpi)
-        width_mm = settings.target_width_mm if settings.target_width_mm > 0.0 else 100.0
-        height_mm = settings.target_height_mm if settings.target_height_mm > 0.0 else 100.0
+        width_mm = settings.target_width_mm if settings.target_width_mm > 0.0 else 400.0
+        height_mm = settings.target_height_mm if settings.target_height_mm > 0.0 else 400.0
         self.spin_prep_width_mm.setValue(width_mm)
         self.spin_prep_height_mm.setValue(height_mm)
         self.spin_prep_blur.setValue(settings.blur_radius)
@@ -701,10 +758,13 @@ class MainWindow(QMainWindow):
         if source is None:
             return False
 
+        settings, clamped = self._sanitize_prep_settings_for_machine(self._read_prep_settings_from_controls())
+        if clamped:
+            self._show_toast("Image dimensions were clamped to robot limits.")
         try:
             settings, artifacts = process_image_for_prep(
                 image_path=source,
-                settings=self._read_prep_settings_from_controls(),
+                settings=settings,
             )
         except Exception as exc:
             QMessageBox.warning(self, "Image prep", str(exc))
@@ -737,8 +797,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing image", f"Source image does not exist:\n{image_path}")
             return False
 
+        effective_settings = (settings or self.image_prep_state.settings).sanitized()
+        if effective_settings.target_width_mm <= 0.0 or effective_settings.target_height_mm <= 0.0:
+            default_width_mm, default_height_mm = self._default_target_dimensions_for_source(image_path)
+            effective_settings.target_width_mm = default_width_mm
+            effective_settings.target_height_mm = default_height_mm
+        effective_settings, clamped = self._sanitize_prep_settings_for_machine(effective_settings)
+        if clamped:
+            self._show_toast("Image dimensions were clamped to robot limits.")
+
         self.image_prep_state.source_image_path = image_path
-        self.image_prep_state.settings = (settings or self.image_prep_state.settings).sanitized()
+        self.image_prep_state.settings = effective_settings
         self.image_prep_state.sidecar_path = sidecar_path or sidecar_path_for_image(image_path)
         self.image_prep_state.export_bmp_path = export_bmp_path or processed_bmp_path_for_image(image_path)
         self.image_prep_state.linked_to_control = False
@@ -1674,6 +1743,11 @@ class MainWindow(QMainWindow):
         profile.home_x_mm = width / 2.0
         self.converter.machine_profile = profile
         self.preview_canvas.set_machine_profile(profile)
+        self._update_prep_dimension_spin_limits()
+        prep_settings, prep_clamped = self._sanitize_prep_settings_for_machine(self.image_prep_state.settings)
+        self.image_prep_state.settings = prep_settings
+        if prep_clamped and self.image_prep_state.source_image_path is not None:
+            self._recompute_prep_artifacts(mark_dirty=True)
         if should_refresh_end_gcode:
             self.settings.end_gcode_lines = default_end_gcode_lines(profile)
             self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")

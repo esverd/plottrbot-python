@@ -31,7 +31,6 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
   - tonal levels (`2-8`)
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
-- While the `Image Prep` tab is active, the right-side canvas switches to prep preview and fits the whole image.
 - Preview can toggle between tonal and halftone views.
 - `Save BMP` writes a deterministic file next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
