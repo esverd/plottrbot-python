@@ -270,10 +270,7 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     bbox = window.job_state.bounding_box
     assert bbox is not None
     point_commands = transport.sent[sent_before_point:]
-    assert point_commands == [
-        "G1 Z1",
-        f"G1 X{bbox.min_x:.3f} Y{bbox.min_y:.3f}",
-    ]
+    assert point_commands == [f"G1 X{bbox.min_x:.3f} Y{bbox.min_y:.3f} Z0"]
 
     sent_calls_before = len(streamer.send_calls)
     qtbot.mouseClick(window.btn_send_img, Qt.MouseButton.LeftButton)

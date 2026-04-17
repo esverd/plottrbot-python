@@ -196,7 +196,7 @@ class MainWindow(QMainWindow):
         bbox_points_panel_layout = QVBoxLayout(self.bbox_points_panel)
         bbox_points_panel_layout.setContentsMargins(0, 0, 0, 0)
         bbox_points_panel_layout.setSpacing(3)
-        bbox_points_label = QLabel("Bounding-box points (pen up)")
+        bbox_points_label = QLabel("Bounding-box points")
         bbox_points_label.setObjectName("bboxPointsHeader")
         bbox_points_panel_layout.addWidget(bbox_points_label)
 
@@ -1001,10 +1001,10 @@ class MainWindow(QMainWindow):
             )
             return
 
+        pen_position = 0 if self.checkbox_bounding_pen.isChecked() else 1
         self._send_manual_commands_async(
             [
-                "G1 Z1",
-                f"G1 X{target_x:.3f} Y{target_y:.3f}",
+                f"G1 X{target_x:.3f} Y{target_y:.3f} Z{pen_position}",
             ],
             f"Move to bounding-box point ({point_label})",
         )

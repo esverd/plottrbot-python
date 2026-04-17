@@ -575,7 +575,7 @@ def test_paused_stream_allows_manual_controls(qtbot, settings_store, tmp_path: P
     assert "M17" in transport.sent
 
 
-def test_bounding_box_point_move_sends_pen_up_then_target(qtbot, settings_store, tmp_path: Path) -> None:
+def test_bounding_box_point_move_uses_pen_toggle(qtbot, settings_store, tmp_path: Path) -> None:
     transport = FakeTransport()
     transport.connected = True
     streamer = FakeStreamer()
@@ -601,10 +601,12 @@ def test_bounding_box_point_move_sends_pen_up_then_target(qtbot, settings_store,
     assert bbox is not None
     expected_x = bbox.min_x + ((bbox.max_x - bbox.min_x) * 0.5)
     expected_y = bbox.min_y + ((bbox.max_y - bbox.min_y) * 0.5)
-    assert transport.sent[-2:] == [
-        "G1 Z1",
-        f"G1 X{expected_x:.3f} Y{expected_y:.3f}",
-    ]
+    assert transport.sent[-1] == f"G1 X{expected_x:.3f} Y{expected_y:.3f} Z1"
+
+    window.checkbox_bounding_pen.setChecked(True)
+    qtbot.mouseClick(window.bbox_point_buttons["middle"], Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
+    assert transport.sent[-1] == f"G1 X{expected_x:.3f} Y{expected_y:.3f} Z0"
 
 
 def test_draw_session_log_captures_stop_metadata(qtbot, settings_store, tmp_path: Path) -> None:
