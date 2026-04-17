@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import bisect
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from plottrbot.config.settings import SettingsStore, default_end_gcode_lines, uses_builtin_end_gcode
 from plottrbot.core.bmp_converter import BmpConverter
+from plottrbot.core.draw_session_logger import DrawSessionLogger
 from plottrbot.core.models import JobState, RetainedImage
 from plottrbot.core.state_machine import UiState, derive_ui_state
 from plottrbot.serial.nano_transport import NanoTransport
@@ -60,6 +62,7 @@ class MainWindow(QMainWindow):
         streamer: ProgramStreamer | None = None,
         converter: BmpConverter | None = None,
         sleep_inhibitor: SleepInhibitor | None = None,
+        draw_session_logger: DrawSessionLogger | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Plottrbot")
@@ -82,6 +85,9 @@ class MainWindow(QMainWindow):
             on_log=self.bridge.log_signal.emit,
         )
         self.sleep_inhibitor = sleep_inhibitor or SleepInhibitor(on_log=self.bridge.log_signal.emit)
+        self.draw_session_logger = draw_session_logger or DrawSessionLogger(
+            self.settings_store.path.parent / "draw_logs"
+        )
 
         self._is_drawing = False
         self._manual_busy = False
@@ -348,6 +354,38 @@ class MainWindow(QMainWindow):
 
     def _current_end_gcode_lines(self) -> list[str]:
         return [line.strip() for line in self.txt_end_gcode.toPlainText().splitlines() if line.strip()]
+
+    def _resolve_line_index_for_command(self, command_index: int) -> int | None:
+        mapping = self.job_state.command_to_line_index
+        if not mapping or command_index < 0:
+            return None
+        safe_index = min(command_index, len(mapping) - 1)
+        for idx in range(safe_index, -1, -1):
+            line_index = mapping[idx]
+            if line_index >= 0:
+                return line_index
+        return None
+
+    def _count_lines_sent(self, command_index: int) -> int:
+        line_command_indices = self.job_state.line_to_command_index
+        if not line_command_indices:
+            return 0
+        return bisect.bisect_left(line_command_indices, command_index)
+
+    def _update_draw_session_progress(self, current_command_index: int, *, force_flush: bool = False) -> None:
+        start_index = self.streamer.state.start_index
+        lines_sent_total = self._count_lines_sent(current_command_index)
+        lines_sent_before_start = self._count_lines_sent(start_index)
+        current_line_index = self._resolve_line_index_for_command(max(current_command_index - 1, 0))
+        self.draw_session_logger.update_progress(
+            current_command_index=current_command_index,
+            current_line_index=current_line_index,
+            commands_sent_total=current_command_index,
+            commands_sent_this_run=max(current_command_index - start_index, 0),
+            lines_sent_total=lines_sent_total,
+            lines_sent_this_run=max(lines_sent_total - lines_sent_before_start, 0),
+            force_flush=force_flush,
+        )
 
     def _render_retained_overlay(self) -> None:
         retained = self.job_state.retained_image
@@ -645,7 +683,7 @@ class MainWindow(QMainWindow):
         if self._manual_busy:
             QMessageBox.information(self, "Busy", "Another manual command is still running.")
             return
-        if self._stream_is_active():
+        if self._stream_is_active() and self.streamer.state.status != SendStatus.PAUSED:
             QMessageBox.information(
                 self,
                 "Busy",
@@ -729,6 +767,32 @@ class MainWindow(QMainWindow):
         self._is_drawing = True
         self.btn_pause_drawing.setText("Pause drawing")
         self._pending_stop_recovery = False
+        if self.job_state.loaded_file is not None:
+            try:
+                metadata = self.converter.inspect_image(
+                    self.job_state.loaded_file,
+                    dpi_override=self.job_state.dpi_override,
+                )
+                draw_log_path = self.draw_session_logger.start_session(
+                    image_path=self.job_state.loaded_file,
+                    image_width_px=metadata.image_width_px,
+                    image_height_px=metadata.image_height_px,
+                    image_width_mm=metadata.image_width_mm,
+                    image_height_mm=metadata.image_height_mm,
+                    dpi=metadata.dpi_x,
+                    move_x_mm=self.job_state.img_move_x_mm,
+                    move_y_mm=self.job_state.img_move_y_mm,
+                    gcode_commands=self.job_state.gcode,
+                    end_gcode_lines=self._current_end_gcode_lines(),
+                    start_command_index=start_index,
+                    command_to_line_index=self.job_state.command_to_line_index,
+                    line_to_command_index=self.job_state.line_to_command_index,
+                    machine_profile=asdict(self.settings.machine_profile),
+                    serial_port=self.transport.port_name,
+                )
+                self._append_log(f"Draw session log: {draw_log_path}")
+            except Exception as exc:
+                self._append_log(f"Draw session logging unavailable: {exc}")
         self._append_log(
             f"Drawing image. Starting at command {start_index} of {len(self.job_state.gcode)}"
         )
@@ -744,10 +808,31 @@ class MainWindow(QMainWindow):
             self.job_state.paused = True
             self.btn_pause_drawing.setText("Continue drawing")
             self._append_log(f"Commands successfully sent = {self.job_state.current_send_index}")
+            self._update_draw_session_progress(self.job_state.current_send_index, force_flush=True)
+            self.draw_session_logger.add_event(
+                "paused",
+                details={
+                    "current_command_index": self.job_state.current_send_index,
+                    "current_line_index": self._resolve_line_index_for_command(
+                        max(self.job_state.current_send_index - 1, 0)
+                    ),
+                    "lines_sent_total": self._count_lines_sent(self.job_state.current_send_index),
+                },
+            )
         elif state == SendStatus.PAUSED:
             self.streamer.resume()
             self.job_state.paused = False
             self.btn_pause_drawing.setText("Pause drawing")
+            self.draw_session_logger.add_event(
+                "resumed",
+                details={
+                    "current_command_index": self.job_state.current_send_index,
+                    "current_line_index": self._resolve_line_index_for_command(
+                        max(self.job_state.current_send_index - 1, 0)
+                    ),
+                    "lines_sent_total": self._count_lines_sent(self.job_state.current_send_index),
+                },
+            )
         self._sync_sleep_inhibitor()
 
     def _on_stop_drawing(self) -> None:
@@ -755,6 +840,16 @@ class MainWindow(QMainWindow):
             return
         self._pending_stop_recovery = self.checkbox_stop_recovery.isChecked()
         self.streamer.stop()
+        self.draw_session_logger.add_event(
+            "stop_requested",
+            details={
+                "current_command_index": self.job_state.current_send_index,
+                "current_line_index": self._resolve_line_index_for_command(
+                    max(self.job_state.current_send_index - 1, 0)
+                ),
+                "lines_sent_total": self._count_lines_sent(self.job_state.current_send_index),
+            },
+        )
         self._append_log("Stop requested")
 
     def _on_start_from_command_number(self) -> None:
@@ -861,6 +956,43 @@ class MainWindow(QMainWindow):
             if state_obj.status == SendStatus.ERROR and state_obj.last_error:
                 QMessageBox.warning(self, "Streaming error", state_obj.last_error)
             self._append_log(f"Commands successfully sent = {state_obj.current_index}")
+            self._update_draw_session_progress(state_obj.current_index, force_flush=True)
+            lines_sent_total = self._count_lines_sent(state_obj.current_index)
+            lines_sent_before_start = self._count_lines_sent(state_obj.start_index)
+            current_line_index = self._resolve_line_index_for_command(
+                max(state_obj.current_index - 1, 0)
+            )
+            if state_obj.status == SendStatus.COMPLETED:
+                self.draw_session_logger.finalize(
+                    status="completed",
+                    current_command_index=state_obj.current_index,
+                    current_line_index=current_line_index,
+                    commands_sent_total=state_obj.current_index,
+                    commands_sent_this_run=max(state_obj.current_index - state_obj.start_index, 0),
+                    lines_sent_total=lines_sent_total,
+                    lines_sent_this_run=max(lines_sent_total - lines_sent_before_start, 0),
+                )
+            elif state_obj.status == SendStatus.STOPPED:
+                self.draw_session_logger.finalize(
+                    status="stopped",
+                    current_command_index=state_obj.current_index,
+                    current_line_index=current_line_index,
+                    commands_sent_total=state_obj.current_index,
+                    commands_sent_this_run=max(state_obj.current_index - state_obj.start_index, 0),
+                    lines_sent_total=lines_sent_total,
+                    lines_sent_this_run=max(lines_sent_total - lines_sent_before_start, 0),
+                )
+            else:
+                self.draw_session_logger.finalize(
+                    status="error",
+                    current_command_index=state_obj.current_index,
+                    current_line_index=current_line_index,
+                    commands_sent_total=state_obj.current_index,
+                    commands_sent_this_run=max(state_obj.current_index - state_obj.start_index, 0),
+                    lines_sent_total=lines_sent_total,
+                    lines_sent_this_run=max(lines_sent_total - lines_sent_before_start, 0),
+                    error=state_obj.last_error,
+                )
             if state_obj.status == SendStatus.COMPLETED:
                 self.job_state.current_send_index = 0
                 self._pending_stop_recovery = False
@@ -876,6 +1008,7 @@ class MainWindow(QMainWindow):
 
     def _on_stream_progress(self, sent_command_index: int, _total_commands: int) -> None:
         self.job_state.current_send_index = sent_command_index + 1
+        self._update_draw_session_progress(self.job_state.current_send_index)
         if 0 <= sent_command_index < len(self.job_state.command_to_line_index):
             line_index = self.job_state.command_to_line_index[sent_command_index]
             if line_index >= 0:
@@ -885,7 +1018,9 @@ class MainWindow(QMainWindow):
         has_image = self.job_state.loaded_file is not None
         is_sliced = bool(self.job_state.lines)
         usb_connected = self.transport.is_connected
+        stream_status = self.streamer.state.status
         stream_active = self._stream_is_active()
+        stream_paused = stream_status == SendStatus.PAUSED
         interaction_locked = stream_active or self._manual_busy
         retained_available = self.job_state.retained_image is not None
         self.current_ui_state = derive_ui_state(
@@ -915,7 +1050,7 @@ class MainWindow(QMainWindow):
         self.btn_slider_dec.setEnabled(sliced_controls)
         self.btn_slider_inc.setEnabled(sliced_controls)
 
-        connected_controls = usb_connected and not stream_active and not self._manual_busy
+        connected_controls = usb_connected and not self._manual_busy and (not stream_active or stream_paused)
         self.txt_serial_cmd.setEnabled(connected_controls)
         self.btn_send_cmd.setEnabled(connected_controls)
         motor_power_controls = connected_controls and self.settings.motor_power_commands_enabled
@@ -939,6 +1074,20 @@ class MainWindow(QMainWindow):
         self.sleep_inhibitor.stop()
 
     def closeEvent(self, event: object) -> None:  # noqa: N802 (Qt API)
+        if self._stream_is_active():
+            current_index = self.job_state.current_send_index
+            lines_sent_total = self._count_lines_sent(current_index)
+            start_index = self.streamer.state.start_index
+            lines_sent_before_start = self._count_lines_sent(start_index)
+            self.draw_session_logger.finalize(
+                status="closed_while_active",
+                current_command_index=current_index,
+                current_line_index=self._resolve_line_index_for_command(max(current_index - 1, 0)),
+                commands_sent_total=current_index,
+                commands_sent_this_run=max(current_index - start_index, 0),
+                lines_sent_total=lines_sent_total,
+                lines_sent_this_run=max(lines_sent_total - lines_sent_before_start, 0),
+            )
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
         self.settings.end_gcode_lines = [

@@ -28,6 +28,10 @@ class FakeTransport:
     def is_connected(self) -> bool:
         return self.connected
 
+    @property
+    def port_name(self) -> str:
+        return "/dev/ttyUSB0"
+
     def list_ports(self) -> list[_Port]:
         return [_Port(device="/dev/ttyUSB0")]
 

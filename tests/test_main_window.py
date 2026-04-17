@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 import time
@@ -29,6 +30,10 @@ class FakeTransport:
     @property
     def is_connected(self) -> bool:
         return self.connected
+
+    @property
+    def port_name(self) -> str:
+        return "/dev/ttyUSB0"
 
     def list_ports(self) -> list[_Port]:
         return [_Port(device="/dev/ttyUSB0")]
@@ -526,6 +531,95 @@ def test_stop_recovery_and_sleep_inhibitor_flow(qtbot, settings_store, tmp_path:
     assert "G1 Z1" in transport.sent
     assert "G28" in transport.sent
     assert inhibitor.stopped >= 1
+
+
+def test_paused_stream_allows_manual_controls(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    window._on_send_image()
+
+    paused_state = SendSessionState(
+        status=SendStatus.PAUSED,
+        start_index=0,
+        current_index=4,
+        total_commands=len(window.job_state.gcode),
+    )
+    streamer._state = paused_state
+    window._on_stream_state(paused_state)
+    window._update_ui_state()
+
+    assert window.btn_send_cmd.isEnabled() is True
+    assert window.btn_pen_touch.isEnabled() is True
+    assert window.btn_pen_away.isEnabled() is True
+    assert window.btn_enable_stepper.isEnabled() is True
+    assert window.btn_disable_stepper.isEnabled() is True
+
+    window._send_manual_commands_async(["M17"], "Enable motors")
+    qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
+    assert "M17" in transport.sent
+
+
+def test_draw_session_log_captures_stop_metadata(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    window.checkbox_stop_recovery.setChecked(False)
+
+    window._on_send_image()
+    window._on_stream_progress(3, len(window.job_state.gcode))
+    window._on_stop_drawing()
+    stopped_state = SendSessionState(
+        status=SendStatus.STOPPED,
+        start_index=0,
+        current_index=4,
+        total_commands=len(window.job_state.gcode),
+    )
+    streamer._state = stopped_state
+    window._on_stream_state(stopped_state)
+
+    log_files = list((settings_store.path.parent / "draw_logs").glob("draw-session-*.json"))
+    assert len(log_files) == 1
+    payload = json.loads(log_files[0].read_text(encoding="utf-8"))
+
+    assert payload["status"] == "stopped"
+    assert payload["started_at_utc"]
+    assert payload["finished_at_utc"]
+    assert payload["image"]["file_name"] == "img.bmp"
+    assert payload["image"]["file_path"] == str(bmp_path)
+    assert payload["draw_plan"]["start_command_index"] == 0
+    assert payload["draw_plan"]["total_commands"] == len(window.job_state.gcode)
+    assert payload["progress"]["commands_sent_total"] == 4
+    assert payload["progress"]["lines_sent_total"] == 1
+    assert any(event["event"] == "stop_requested" for event in payload["events"])
+    assert any(event["event"] == "session_stopped" for event in payload["events"])
+    assert payload["gcode_commands"] == window.job_state.gcode
 
 
 def test_stream_active_locks_mutating_controls_and_completion_resets_send_index(

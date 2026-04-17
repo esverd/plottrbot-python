@@ -19,13 +19,26 @@ python3 -m plottrbot
 ```
 
 Settings are stored at `~/.config/plottrbot/config.json`.
+Per-draw debug logs are stored in the sibling `draw_logs` directory next to that config file.
 
 ## Streaming safety behaviors
 
 - USB connect runs a preflight (`G92 H`) and requires a valid `GO` acknowledgement.
 - Manual serial actions run asynchronously to avoid UI freezing on slow serial responses.
 - Streaming includes `Pause` and `Stop`; optional stop recovery sends `G1 Z1` then `G28`.
+- While a stream is paused, manual controls remain available (`M17`, `M18`, tool up/down, home, raw serial).
 - Out-of-bounds generated paths are blocked before streaming.
+
+## Draw session logs
+
+Every draw start creates a JSON session log with:
+
+- image file/path, placement, size, and DPI
+- machine profile and USB port
+- start command/line index and total command/line counts
+- full generated G-code payload
+- timeline events (`started`, `paused`, `resumed`, `stop_requested`, final session status)
+- progress counters (commands/lines sent, including stop-time counts)
 
 ## Run tests
 
