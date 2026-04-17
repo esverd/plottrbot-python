@@ -192,22 +192,61 @@ class MainWindow(QMainWindow):
 
         self.btn_bounding_box = QPushButton("Move in bounding box formation")
         self.bbox_point_buttons: dict[str, QPushButton] = {}
-        bbox_points_group = QGroupBox("Move to bounding-box point (pen up)")
-        bbox_points_layout = QGridLayout(bbox_points_group)
+        self.bbox_points_panel = QWidget()
+        bbox_points_panel_layout = QVBoxLayout(self.bbox_points_panel)
+        bbox_points_panel_layout.setContentsMargins(0, 0, 0, 0)
+        bbox_points_panel_layout.setSpacing(3)
+        bbox_points_label = QLabel("Bounding-box points (pen up)")
+        bbox_points_label.setObjectName("bboxPointsHeader")
+        bbox_points_panel_layout.addWidget(bbox_points_label)
+
+        self.bbox_points_grid = QWidget()
+        bbox_points_layout = QGridLayout(self.bbox_points_grid)
+        bbox_points_layout.setContentsMargins(0, 0, 0, 0)
+        bbox_points_layout.setHorizontalSpacing(4)
+        bbox_points_layout.setVerticalSpacing(4)
         for row_index, row in enumerate(self.BBOX_POINT_GRID):
             for col_index, (point_label, _x_ratio, _y_ratio) in enumerate(row):
                 button = QPushButton("")
-                button.setFixedSize(34, 34)
+                button.setObjectName("bboxPointButton")
+                button.setFixedSize(24, 24)
                 button.setToolTip(point_label.title())
                 button.setAccessibleName(f"Bounding box point {point_label}")
                 self.bbox_point_buttons[point_label] = button
                 bbox_points_layout.addWidget(button, row_index, col_index)
+        bbox_points_panel_layout.addWidget(self.bbox_points_grid)
+        self.bbox_points_panel.setStyleSheet(
+            """
+            QLabel#bboxPointsHeader {
+                color: #4f5561;
+                font-size: 11px;
+            }
+            QPushButton#bboxPointButton {
+                border: 1px solid #b8bec8;
+                border-radius: 5px;
+                background: #f7f9fc;
+                padding: 0px;
+            }
+            QPushButton#bboxPointButton:hover:!disabled {
+                background: #edf2f8;
+                border-color: #8f99a8;
+            }
+            QPushButton#bboxPointButton:pressed:!disabled {
+                background: #e1e7f0;
+            }
+            QPushButton#bboxPointButton:disabled {
+                color: transparent;
+                border-color: #d0d4db;
+                background: #f2f4f7;
+            }
+            """
+        )
         self.btn_pause_drawing = QPushButton("Pause drawing")
         self.btn_stop_drawing = QPushButton("Stop drawing")
         self.btn_send_img = QPushButton("Send image to robot")
         robot_layout.addLayout(port_row)
         robot_layout.addWidget(self.btn_bounding_box)
-        robot_layout.addWidget(bbox_points_group)
+        robot_layout.addWidget(self.bbox_points_panel)
         robot_layout.addWidget(self.btn_pause_drawing)
         robot_layout.addWidget(self.btn_stop_drawing)
         robot_layout.addWidget(self.btn_send_img)
