@@ -264,6 +264,17 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     assert len(bbox_commands_pen_down) == 7
     assert "Z0" in bbox_commands_pen_down[1]
 
+    sent_before_point = len(transport.sent)
+    qtbot.mouseClick(window.bbox_point_buttons["top left"], Qt.MouseButton.LeftButton)
+    _wait_manual_idle(qtbot, window)
+    bbox = window.job_state.bounding_box
+    assert bbox is not None
+    point_commands = transport.sent[sent_before_point:]
+    assert point_commands == [
+        "G1 Z1",
+        f"G1 X{bbox.min_x:.3f} Y{bbox.min_y:.3f}",
+    ]
+
     sent_calls_before = len(streamer.send_calls)
     qtbot.mouseClick(window.btn_send_img, Qt.MouseButton.LeftButton)
     assert len(streamer.send_calls) == sent_calls_before + 1

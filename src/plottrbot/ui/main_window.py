@@ -53,6 +53,23 @@ class ManualCommandResult:
 
 class MainWindow(QMainWindow):
     DEFAULT_BMP_DPI = 35
+    BBOX_POINT_GRID: tuple[tuple[tuple[str, float, float], ...], ...] = (
+        (
+            ("top left", 0.0, 0.0),
+            ("top middle", 0.5, 0.0),
+            ("top right", 1.0, 0.0),
+        ),
+        (
+            ("middle left", 0.0, 0.5),
+            ("middle", 0.5, 0.5),
+            ("middle right", 1.0, 0.5),
+        ),
+        (
+            ("bottom left", 0.0, 1.0),
+            ("bottom middle", 0.5, 1.0),
+            ("bottom right", 1.0, 1.0),
+        ),
+    )
 
     def __init__(
         self,
@@ -174,11 +191,23 @@ class MainWindow(QMainWindow):
         port_row.addWidget(self.btn_connect)
 
         self.btn_bounding_box = QPushButton("Move in bounding box formation")
+        self.bbox_point_buttons: dict[str, QPushButton] = {}
+        bbox_points_group = QGroupBox("Move to bounding-box point (pen up)")
+        bbox_points_layout = QGridLayout(bbox_points_group)
+        for row_index, row in enumerate(self.BBOX_POINT_GRID):
+            for col_index, (point_label, _x_ratio, _y_ratio) in enumerate(row):
+                button = QPushButton("")
+                button.setFixedSize(34, 34)
+                button.setToolTip(point_label.title())
+                button.setAccessibleName(f"Bounding box point {point_label}")
+                self.bbox_point_buttons[point_label] = button
+                bbox_points_layout.addWidget(button, row_index, col_index)
         self.btn_pause_drawing = QPushButton("Pause drawing")
         self.btn_stop_drawing = QPushButton("Stop drawing")
         self.btn_send_img = QPushButton("Send image to robot")
         robot_layout.addLayout(port_row)
         robot_layout.addWidget(self.btn_bounding_box)
+        robot_layout.addWidget(bbox_points_group)
         robot_layout.addWidget(self.btn_pause_drawing)
         robot_layout.addWidget(self.btn_stop_drawing)
         robot_layout.addWidget(self.btn_send_img)
@@ -283,6 +312,15 @@ class MainWindow(QMainWindow):
         self.btn_refresh_ports.clicked.connect(self._refresh_ports)
         self.btn_connect.clicked.connect(self._on_connect_toggle)
         self.btn_bounding_box.clicked.connect(self._on_bounding_box)
+        for row in self.BBOX_POINT_GRID:
+            for point_label, x_ratio, y_ratio in row:
+                self.bbox_point_buttons[point_label].clicked.connect(
+                    lambda _checked=False, label=point_label, xr=x_ratio, yr=y_ratio: self._on_move_to_bbox_point(
+                        label,
+                        xr,
+                        yr,
+                    )
+                )
         self.btn_pause_drawing.clicked.connect(self._on_pause_resume)
         self.btn_stop_drawing.clicked.connect(self._on_stop_drawing)
         self.btn_send_img.clicked.connect(self._on_send_image)
@@ -908,6 +946,30 @@ class MainWindow(QMainWindow):
         ]
         self._send_manual_commands_async(commands, "Bounding box trace")
 
+    def _on_move_to_bbox_point(self, point_label: str, x_ratio: float, y_ratio: float) -> None:
+        bbox = self.job_state.bounding_box
+        if bbox is None:
+            QMessageBox.information(self, "No slice", "Slice the image first.")
+            return
+
+        target_x = bbox.min_x + ((bbox.max_x - bbox.min_x) * x_ratio)
+        target_y = bbox.min_y + ((bbox.max_y - bbox.min_y) * y_ratio)
+        if not self._is_point_within_bounds(target_x, target_y):
+            QMessageBox.warning(
+                self,
+                "Bounds check failed",
+                f"Target point is out of machine bounds at X{target_x:.3f} Y{target_y:.3f}.",
+            )
+            return
+
+        self._send_manual_commands_async(
+            [
+                "G1 Z1",
+                f"G1 X{target_x:.3f} Y{target_y:.3f}",
+            ],
+            f"Move to bounding-box point ({point_label})",
+        )
+
     def _on_save_dimensions(self) -> None:
         width = self._parse_int(self.txt_robot_width, "Robot width")
         height = self._parse_int(self.txt_robot_height, "Robot height")
@@ -1059,6 +1121,9 @@ class MainWindow(QMainWindow):
         self.btn_pen_touch.setEnabled(connected_controls)
         self.btn_pen_away.setEnabled(connected_controls)
         self.btn_home.setEnabled(connected_controls)
+        bbox_point_controls = connected_controls and self.job_state.bounding_box is not None
+        for button in self.bbox_point_buttons.values():
+            button.setEnabled(bbox_point_controls)
 
         can_draw = is_sliced and usb_connected
         self.btn_bounding_box.setEnabled(can_draw and not stream_active and not self._manual_busy)

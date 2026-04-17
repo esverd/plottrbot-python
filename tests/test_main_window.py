@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from PIL import Image
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from plottrbot.config.settings import default_end_gcode_lines
@@ -567,10 +568,43 @@ def test_paused_stream_allows_manual_controls(qtbot, settings_store, tmp_path: P
     assert window.btn_pen_away.isEnabled() is True
     assert window.btn_enable_stepper.isEnabled() is True
     assert window.btn_disable_stepper.isEnabled() is True
+    assert all(button.isEnabled() for button in window.bbox_point_buttons.values())
 
     window._send_manual_commands_async(["M17"], "Enable motors")
     qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
     assert "M17" in transport.sent
+
+
+def test_bounding_box_point_move_sends_pen_up_then_target(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    assert window.job_state.bounding_box is not None
+
+    qtbot.mouseClick(window.bbox_point_buttons["middle"], Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._manual_busy is False, timeout=1500)
+
+    bbox = window.job_state.bounding_box
+    assert bbox is not None
+    expected_x = bbox.min_x + ((bbox.max_x - bbox.min_x) * 0.5)
+    expected_y = bbox.min_y + ((bbox.max_y - bbox.min_y) * 0.5)
+    assert transport.sent[-2:] == [
+        "G1 Z1",
+        f"G1 X{expected_x:.3f} Y{expected_y:.3f}",
+    ]
 
 
 def test_draw_session_log_captures_stop_metadata(qtbot, settings_store, tmp_path: Path) -> None:
