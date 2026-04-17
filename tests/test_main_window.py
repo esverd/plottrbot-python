@@ -7,9 +7,10 @@ import time
 
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from plottrbot.config.settings import default_end_gcode_lines
+from plottrbot.core.image_prep import ImagePrepSettings
 from plottrbot.serial.nano_transport import AckResult
 from plottrbot.serial.program_streamer import SendSessionState, SendStatus
 from plottrbot.ui.main_window import MainWindow
@@ -134,6 +135,15 @@ def _create_simple_bmp(path: Path) -> None:
     image.putpixel((0, 1), (0, 0, 0))
     image.putpixel((1, 2), (0, 0, 0))
     image.save(path, format="BMP", dpi=(25.4, 25.4))
+
+
+def _create_simple_jpg(path: Path) -> None:
+    image = Image.new("RGB", (20, 20), color=(255, 255, 255))
+    for x in range(20):
+        shade = int(round((x / 19.0) * 255))
+        for y in range(20):
+            image.putpixel((x, y), (shade, shade, shade))
+    image.save(path, format="JPEG")
 
 
 def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> None:
@@ -740,3 +750,138 @@ def test_clear_image_preserves_retained_overlay(qtbot, settings_store, tmp_path:
     assert window.preview_canvas._primary_image is None
     assert window.preview_canvas._retained_image is not None
     assert window.preview_canvas.render_mode == "image"
+
+
+def test_image_prep_apply_to_control_and_slice(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "prep.jpg"
+    _create_simple_jpg(jpg_path)
+
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=40),
+        mark_dirty=True,
+    )
+    window._on_prep_apply_to_control()
+
+    assert window.image_prep_state.linked_to_control is True
+    assert window.job_state.loaded_file is not None
+    assert window.job_state.loaded_file.name == "prep.plottrbot.processed.bmp"
+    assert window.job_state.dpi_override == 40
+
+    window._on_slice_image()
+    assert window.job_state.lines
+    assert window.job_state.gcode
+
+
+def test_image_prep_dirty_refresh_runs_before_slice(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "dirty.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+    window._on_prep_apply_to_control()
+    assert window.job_state.loaded_file is not None
+
+    export_path = window.job_state.loaded_file
+    before_bytes = export_path.read_bytes()
+
+    window.spin_prep_levels.setValue(6)
+    window.spin_prep_dpi.setValue(52)
+    window.combo_prep_strategy.setCurrentText("relative")
+    assert window.image_prep_state.dirty is True
+
+    window._on_slice_image()
+    after_bytes = export_path.read_bytes()
+
+    assert before_bytes != after_bytes
+    assert window.image_prep_state.dirty is False
+    assert window.job_state.dpi_override == 52
+
+
+def test_image_prep_sidecar_load_restores_settings(qtbot, settings_store, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "restore.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=44, blur_radius=1.2, levels=5, strategy="relative"),
+        mark_dirty=True,
+    )
+    window.checkbox_prep_auto_thresholds.setChecked(False)
+    window.txt_prep_manual_thresholds.setText("30,90,150,220")
+    window._on_prep_settings_changed()
+    window._on_prep_save_sidecar()
+
+    sidecar_path = window.image_prep_state.sidecar_path
+    assert sidecar_path is not None
+    assert sidecar_path.exists()
+
+    window.image_prep_state.clear()
+    window._sync_prep_controls_from_state()
+
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *_a, **_k: (str(sidecar_path), "Plottrbot sidecar (*.plottrbot-edit.json)"),
+    )
+    window._on_prep_load_sidecar()
+
+    assert window.image_prep_state.source_image_path is not None
+    assert window.image_prep_state.source_image_path.resolve() == jpg_path.resolve()
+    assert window.spin_prep_dpi.value() == 44
+    assert window.spin_prep_levels.value() == 5
+    assert window.combo_prep_strategy.currentText() == "relative"
+    assert window.prep_preview_label.pixmap() is not None
+
+
+def test_halftone_preview_toggle_does_not_change_export_bmp(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "preview.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35, levels=4),
+        mark_dirty=True,
+    )
+    window._on_prep_save_bmp()
+    export_path = window.image_prep_state.export_bmp_path
+    assert export_path is not None
+    before = export_path.read_bytes()
+
+    window.checkbox_prep_halftone_preview.setChecked(True)
+    window._on_prep_save_bmp()
+    after = export_path.read_bytes()
+
+    assert before == after

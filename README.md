@@ -5,6 +5,7 @@ Phase 1 Python/Linux port of the `plottrbot-csharp` desktop app.
 ## Scope in this phase
 
 - BMP workflow: load, move, slice, preview, and stream commands to Nano.
+- JPG prep workflow: preprocess `.jpg/.jpeg` in-app and generate deterministic processed BMP output.
 - Manual robot controls over USB serial (`9600`, newline commands, `GO` ack).
 - SVG draw/send is intentionally deferred in this phase.
 - Linux sleep is inhibited while USB is connected and an active stream is running.
@@ -21,6 +22,22 @@ python3 -m plottrbot
 Settings are stored at `~/.config/plottrbot/config.json`.
 Per-draw debug logs are stored in the sibling `draw_logs` directory next to that config file.
 
+## Image Prep Workflow
+
+- Use the `Image Prep` tab to load a JPG/JPEG and adjust:
+  - DPI
+  - Gaussian blur
+  - tonal levels (`2-8`)
+  - threshold strategy (`banded` or `relative`)
+  - auto/manual thresholds
+- Preview can toggle between tonal and halftone views.
+- `Save BMP` writes a deterministic file next to the source JPG:
+  - `<image-stem>.plottrbot.processed.bmp`
+- `Save sidecar` writes editable prep metadata next to the source JPG:
+  - `<image-stem>.plottrbot-edit.json`
+- `Apply To Control` loads the generated BMP into the existing Control tab flow.
+- If prep-linked settings are changed after apply, slicing from Control auto-refreshes the processed BMP first.
+
 ## Streaming safety behaviors
 
 - USB connect runs a preflight (`G92 H`) and requires a valid `GO` acknowledgement.
@@ -34,6 +51,7 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
 Every draw start creates a JSON session log with:
 
 - image file/path, placement, size, and DPI
+- optional image-prep metadata (source JPG + prep settings) when the draw came from `Image Prep`
 - machine profile and USB port
 - start command/line index and total command/line counts
 - full generated G-code payload

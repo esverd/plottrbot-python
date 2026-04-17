@@ -24,6 +24,10 @@ def test_draw_session_logger_writes_start_progress_and_final_status(tmp_path: Pa
         line_to_command_index=[3, 5],
         machine_profile={"canvas_width_mm": 1162, "canvas_height_mm": 1000},
         serial_port="COM3",
+        image_prep={
+            "source_image_path": "C:/tmp/source.jpg",
+            "settings": {"dpi": 35, "levels": 4},
+        },
     )
 
     assert path.exists()
@@ -33,6 +37,7 @@ def test_draw_session_logger_writes_start_progress_and_final_status(tmp_path: Pa
     assert started_payload["draw_plan"]["start_line_index"] is None
     assert started_payload["image"]["placement_top_left_mm"] == {"x": 331, "y": 250}
     assert started_payload["gcode_commands"][3] == "G1 X0 Y10"
+    assert started_payload["image_prep"]["source_image_path"] == "C:/tmp/source.jpg"
 
     logger.add_event("stop_requested", details={"reason": "operator"})
     logger.update_progress(

@@ -44,6 +44,7 @@ class DrawSessionLogger:
         line_to_command_index: list[int],
         machine_profile: dict[str, Any],
         serial_port: str,
+        image_prep: dict[str, Any] | None = None,
     ) -> Path:
         started_at = _utc_now_iso()
         session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -109,6 +110,8 @@ class DrawSessionLogger:
             ],
             "gcode_commands": list(gcode_commands),
         }
+        if image_prep:
+            session["image_prep"] = image_prep
 
         with self._lock:
             self._active_path = session_path

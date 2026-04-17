@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import bisect
+import io
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -20,15 +23,29 @@ from PySide6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QScrollArea,
+    QSpinBox,
     QSlider,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+from PIL import Image
 
 from plottrbot.config.settings import SettingsStore, default_end_gcode_lines, uses_builtin_end_gcode
 from plottrbot.core.bmp_converter import BmpConverter
 from plottrbot.core.draw_session_logger import DrawSessionLogger
+from plottrbot.core.image_prep import (
+    ImagePrepSettings,
+    ImagePrepState,
+    is_supported_source_image,
+    parse_threshold_text,
+    process_image_for_prep,
+    processed_bmp_path_for_image,
+    read_sidecar,
+    save_processed_bmp,
+    sidecar_path_for_image,
+    write_sidecar,
+)
 from plottrbot.core.models import JobState, RetainedImage
 from plottrbot.core.state_machine import UiState, derive_ui_state
 from plottrbot.serial.nano_transport import NanoTransport
@@ -87,6 +104,8 @@ class MainWindow(QMainWindow):
         self.settings_store = settings_store or SettingsStore()
         self.settings = self.settings_store.load()
         self.job_state = JobState(preview_scale=0.8)
+        self.image_prep_state = ImagePrepState()
+        self._prep_updating_controls = False
 
         self.converter = converter or BmpConverter(self.settings.machine_profile)
         self.bridge = UiBridge()
@@ -128,11 +147,14 @@ class MainWindow(QMainWindow):
         self.tab_control.setMinimumWidth(470)
         layout.addWidget(self.tab_control, 0)
 
+        self.image_prep_tab = QWidget()
         self.control_tab = QWidget()
         self.advanced_tab = QWidget()
+        self.tab_control.addTab(self.image_prep_tab, "Image Prep")
         self.tab_control.addTab(self.control_tab, "Control")
         self.tab_control.addTab(self.advanced_tab, "Advanced")
 
+        self._build_image_prep_tab()
         self._build_control_tab()
         self._build_advanced_tab()
 
@@ -143,6 +165,95 @@ class MainWindow(QMainWindow):
         self.preview_scroll.setWidgetResizable(False)
         self.preview_scroll.setWidget(self.preview_canvas)
         layout.addWidget(self.preview_scroll, 1)
+
+    def _build_image_prep_tab(self) -> None:
+        layout = QVBoxLayout(self.image_prep_tab)
+
+        source_group = QGroupBox("Image source")
+        source_layout = QVBoxLayout(source_group)
+
+        source_buttons = QHBoxLayout()
+        self.btn_prep_load_jpg = QPushButton("Load JPG")
+        self.btn_prep_load_sidecar = QPushButton("Load sidecar")
+        self.btn_prep_save_sidecar = QPushButton("Save sidecar")
+        source_buttons.addWidget(self.btn_prep_load_jpg)
+        source_buttons.addWidget(self.btn_prep_load_sidecar)
+        source_buttons.addWidget(self.btn_prep_save_sidecar)
+        source_layout.addLayout(source_buttons)
+
+        self.lbl_prep_source = QLabel("Source: none")
+        self.lbl_prep_source.setWordWrap(True)
+        source_layout.addWidget(self.lbl_prep_source)
+
+        self.lbl_prep_dimensions = QLabel("Image size: n/a")
+        self.lbl_prep_dimensions.setWordWrap(True)
+        source_layout.addWidget(self.lbl_prep_dimensions)
+        layout.addWidget(source_group)
+
+        controls_group = QGroupBox("Prep controls")
+        controls_layout = QGridLayout(controls_group)
+
+        self.spin_prep_dpi = QSpinBox()
+        self.spin_prep_dpi.setRange(1, 1200)
+        self.spin_prep_dpi.setValue(self.DEFAULT_BMP_DPI)
+        controls_layout.addWidget(QLabel("DPI"), 0, 0)
+        controls_layout.addWidget(self.spin_prep_dpi, 0, 1)
+
+        self.spin_prep_blur = QDoubleSpinBox()
+        self.spin_prep_blur.setRange(0.0, 10.0)
+        self.spin_prep_blur.setSingleStep(0.1)
+        self.spin_prep_blur.setDecimals(1)
+        self.spin_prep_blur.setValue(0.0)
+        controls_layout.addWidget(QLabel("Gaussian blur"), 0, 2)
+        controls_layout.addWidget(self.spin_prep_blur, 0, 3)
+
+        self.spin_prep_levels = QSpinBox()
+        self.spin_prep_levels.setRange(2, 8)
+        self.spin_prep_levels.setValue(4)
+        controls_layout.addWidget(QLabel("Levels"), 1, 0)
+        controls_layout.addWidget(self.spin_prep_levels, 1, 1)
+
+        self.combo_prep_strategy = QComboBox()
+        self.combo_prep_strategy.addItems(["banded", "relative"])
+        controls_layout.addWidget(QLabel("Threshold strategy"), 1, 2)
+        controls_layout.addWidget(self.combo_prep_strategy, 1, 3)
+
+        self.checkbox_prep_auto_thresholds = QCheckBox("Use auto thresholds")
+        self.checkbox_prep_auto_thresholds.setChecked(True)
+        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 2, 0, 1, 2)
+
+        self.checkbox_prep_halftone_preview = QCheckBox("Show halftone preview")
+        self.checkbox_prep_halftone_preview.setChecked(False)
+        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 2, 2, 1, 2)
+
+        controls_layout.addWidget(QLabel("Manual thresholds"), 3, 0)
+        self.txt_prep_manual_thresholds = QLineEdit("")
+        self.txt_prep_manual_thresholds.setPlaceholderText("e.g. 64,128,192")
+        controls_layout.addWidget(self.txt_prep_manual_thresholds, 3, 1, 1, 3)
+
+        self.lbl_prep_effective_thresholds = QLabel("Effective thresholds: n/a")
+        self.lbl_prep_effective_thresholds.setWordWrap(True)
+        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 4, 0, 1, 4)
+        layout.addWidget(controls_group)
+
+        action_row = QHBoxLayout()
+        self.btn_prep_save_bmp = QPushButton("Save BMP")
+        self.btn_prep_apply_to_control = QPushButton("Apply To Control")
+        action_row.addWidget(self.btn_prep_save_bmp)
+        action_row.addWidget(self.btn_prep_apply_to_control)
+        layout.addLayout(action_row)
+
+        preview_group = QGroupBox("Prep preview")
+        preview_layout = QVBoxLayout(preview_group)
+        self.prep_preview_label = QLabel("Load a JPG to begin.")
+        self.prep_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.prep_preview_label.setMinimumHeight(320)
+
+        self.prep_preview_scroll = QScrollArea()
+        self.prep_preview_scroll.setWidgetResizable(True)
+        self.prep_preview_scroll.setWidget(self.prep_preview_label)
+        preview_layout.addWidget(self.prep_preview_scroll)
+        layout.addWidget(preview_group, 1)
 
     def _build_control_tab(self) -> None:
         layout = QVBoxLayout(self.control_tab)
@@ -339,6 +450,19 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
     def _connect_signals(self) -> None:
+        self.btn_prep_load_jpg.clicked.connect(self._on_prep_load_jpg)
+        self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
+        self.btn_prep_save_sidecar.clicked.connect(self._on_prep_save_sidecar)
+        self.btn_prep_save_bmp.clicked.connect(self._on_prep_save_bmp)
+        self.btn_prep_apply_to_control.clicked.connect(self._on_prep_apply_to_control)
+        self.spin_prep_dpi.valueChanged.connect(self._on_prep_settings_changed)
+        self.spin_prep_blur.valueChanged.connect(self._on_prep_settings_changed)
+        self.spin_prep_levels.valueChanged.connect(self._on_prep_settings_changed)
+        self.combo_prep_strategy.currentTextChanged.connect(self._on_prep_settings_changed)
+        self.checkbox_prep_auto_thresholds.toggled.connect(self._on_prep_auto_thresholds_toggled)
+        self.txt_prep_manual_thresholds.editingFinished.connect(self._on_prep_settings_changed)
+        self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
+
         self.btn_select_img.clicked.connect(self._on_select_image)
         self.btn_move_img.clicked.connect(self._on_move_image)
         self.btn_center_img.clicked.connect(self._on_center_or_top_left)
@@ -397,8 +521,380 @@ class MainWindow(QMainWindow):
         self.txt_dpi.setText(str(self.DEFAULT_BMP_DPI))
         self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")
         self.checkbox_motor_power_commands.setChecked(self.settings.motor_power_commands_enabled)
+        self._sync_prep_controls_from_state()
         self.btn_pause_drawing.setText("Pause drawing")
         self._append_log("Ready")
+
+    def _sync_prep_controls_from_state(self) -> None:
+        settings = self.image_prep_state.settings.sanitized()
+        self.image_prep_state.settings = settings
+        self._prep_updating_controls = True
+        self.spin_prep_dpi.setValue(settings.dpi)
+        self.spin_prep_blur.setValue(settings.blur_radius)
+        self.spin_prep_levels.setValue(settings.levels)
+        self.combo_prep_strategy.setCurrentText(settings.strategy)
+        self.checkbox_prep_auto_thresholds.setChecked(settings.auto_thresholds)
+        if settings.manual_thresholds:
+            manual_text = ",".join(str(value) for value in settings.manual_thresholds)
+        else:
+            manual_text = ""
+        self.txt_prep_manual_thresholds.setText(manual_text)
+        self.checkbox_prep_halftone_preview.setChecked(settings.show_halftone_preview)
+        self.txt_prep_manual_thresholds.setEnabled(not settings.auto_thresholds)
+        self._prep_updating_controls = False
+        self._update_prep_status_labels()
+        self._render_prep_preview()
+
+    def _read_prep_settings_from_controls(self) -> ImagePrepSettings:
+        auto_thresholds = self.checkbox_prep_auto_thresholds.isChecked()
+        if auto_thresholds:
+            manual_thresholds = list(self.image_prep_state.settings.manual_thresholds)
+        else:
+            manual_thresholds = parse_threshold_text(self.txt_prep_manual_thresholds.text())
+        settings = ImagePrepSettings(
+            dpi=self.spin_prep_dpi.value(),
+            blur_radius=self.spin_prep_blur.value(),
+            levels=self.spin_prep_levels.value(),
+            strategy=self.combo_prep_strategy.currentText().strip().lower(),
+            auto_thresholds=auto_thresholds,
+            manual_thresholds=manual_thresholds,
+            show_halftone_preview=self.checkbox_prep_halftone_preview.isChecked(),
+        )
+        return settings.sanitized()
+
+    def _pil_image_to_pixmap(self, image: Image.Image) -> QPixmap:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        qimage = QImage.fromData(buffer.getvalue(), "PNG")
+        return QPixmap.fromImage(qimage)
+
+    def _update_prep_status_labels(self) -> None:
+        source = self.image_prep_state.source_image_path
+        if source is None:
+            self.lbl_prep_source.setText("Source: none")
+            self.lbl_prep_dimensions.setText("Image size: n/a")
+            self.lbl_prep_effective_thresholds.setText("Effective thresholds: n/a")
+            return
+        self.lbl_prep_source.setText(f"Source: {source}")
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            self.lbl_prep_dimensions.setText("Image size: n/a")
+            self.lbl_prep_effective_thresholds.setText("Effective thresholds: n/a")
+            return
+        self.lbl_prep_dimensions.setText(
+            "Image size: "
+            f"{artifacts.image_width_px}x{artifacts.image_height_px}px | "
+            f"{artifacts.image_width_mm:.1f}x{artifacts.image_height_mm:.1f}mm @ {self.image_prep_state.settings.dpi} DPI"
+        )
+        if artifacts.effective_thresholds:
+            thresholds_text = ", ".join(str(value) for value in artifacts.effective_thresholds)
+        else:
+            thresholds_text = "none"
+        self.lbl_prep_effective_thresholds.setText(f"Effective thresholds: {thresholds_text}")
+
+    def _render_prep_preview(self) -> None:
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            self.prep_preview_label.setPixmap(QPixmap())
+            self.prep_preview_label.setText("Load a JPG to begin.")
+            return
+
+        preview_image = (
+            artifacts.halftone_preview_image
+            if self.image_prep_state.settings.show_halftone_preview
+            else artifacts.tonal_preview_image
+        )
+        pixmap = self._pil_image_to_pixmap(preview_image)
+        if pixmap.isNull():
+            self.prep_preview_label.setPixmap(QPixmap())
+            self.prep_preview_label.setText("Preview unavailable.")
+            return
+        self.prep_preview_label.setText("")
+        self.prep_preview_label.setPixmap(pixmap)
+        self.prep_preview_label.resize(pixmap.size())
+
+    def _recompute_prep_artifacts(self, *, mark_dirty: bool) -> bool:
+        source = self.image_prep_state.source_image_path
+        if source is None:
+            return False
+
+        try:
+            settings, artifacts = process_image_for_prep(
+                image_path=source,
+                settings=self._read_prep_settings_from_controls(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Image prep", str(exc))
+            return False
+
+        self.image_prep_state.settings = settings
+        self.image_prep_state.artifacts = artifacts
+        if self.image_prep_state.export_bmp_path is None:
+            self.image_prep_state.export_bmp_path = processed_bmp_path_for_image(source)
+        if self.image_prep_state.sidecar_path is None:
+            self.image_prep_state.sidecar_path = sidecar_path_for_image(source)
+        if mark_dirty:
+            self.image_prep_state.dirty = True
+        self._sync_prep_controls_from_state()
+        return True
+
+    def _load_prep_source_image(
+        self,
+        image_path: Path,
+        *,
+        settings: ImagePrepSettings | None = None,
+        sidecar_path: Path | None = None,
+        export_bmp_path: Path | None = None,
+        mark_dirty: bool,
+    ) -> bool:
+        if not is_supported_source_image(image_path):
+            QMessageBox.information(self, "Not supported", "Image Prep currently supports JPG/JPEG only.")
+            return False
+        if not image_path.exists():
+            QMessageBox.warning(self, "Missing image", f"Source image does not exist:\n{image_path}")
+            return False
+
+        self.image_prep_state.source_image_path = image_path
+        self.image_prep_state.settings = (settings or self.image_prep_state.settings).sanitized()
+        self.image_prep_state.sidecar_path = sidecar_path or sidecar_path_for_image(image_path)
+        self.image_prep_state.export_bmp_path = export_bmp_path or processed_bmp_path_for_image(image_path)
+        self.image_prep_state.linked_to_control = False
+        self.image_prep_state.artifacts = None
+        self.image_prep_state.dirty = bool(mark_dirty)
+
+        self._sync_prep_controls_from_state()
+        if not self._recompute_prep_artifacts(mark_dirty=mark_dirty):
+            return False
+        return True
+
+    def _save_prep_bmp(self) -> Path | None:
+        source = self.image_prep_state.source_image_path
+        if source is None:
+            QMessageBox.information(self, "No image", "Load a JPG image first.")
+            return None
+        if self.image_prep_state.artifacts is None:
+            if not self._recompute_prep_artifacts(mark_dirty=False):
+                return None
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            return None
+
+        output_path = self.image_prep_state.export_bmp_path or processed_bmp_path_for_image(source)
+        save_processed_bmp(
+            output_path=output_path,
+            image=artifacts.export_bmp_image,
+            dpi=self.image_prep_state.settings.dpi,
+        )
+        self.image_prep_state.export_bmp_path = output_path
+        self.image_prep_state.dirty = False
+        if self.image_prep_state.linked_to_control and self.job_state.loaded_file is not None:
+            try:
+                loaded = self.job_state.loaded_file.resolve()
+                expected = output_path.resolve()
+            except OSError:
+                loaded = self.job_state.loaded_file
+                expected = output_path
+            if loaded == expected:
+                metadata = self.converter.inspect_image(
+                    output_path,
+                    dpi_override=self.image_prep_state.settings.dpi,
+                )
+                self.job_state.dpi_override = self.image_prep_state.settings.dpi
+                self.job_state.image_width_mm = metadata.image_width_mm
+                self.job_state.image_height_mm = metadata.image_height_mm
+                self.job_state.image_dpi = metadata.dpi_x
+                self._render_image_preview()
+        self._append_log(f"Saved processed BMP: {output_path}")
+        return output_path
+
+    def _refresh_linked_prep_bmp_for_slice(self) -> bool:
+        if not self.image_prep_state.linked_to_control or not self.image_prep_state.dirty:
+            return True
+        if self.image_prep_state.source_image_path is None:
+            return True
+        if self.job_state.loaded_file is None:
+            return True
+
+        export_path = self.image_prep_state.export_bmp_path
+        if export_path is None:
+            return True
+
+        try:
+            loaded = self.job_state.loaded_file.resolve()
+            expected = export_path.resolve()
+        except OSError:
+            loaded = self.job_state.loaded_file
+            expected = export_path
+        if loaded != expected:
+            return True
+
+        if self.image_prep_state.artifacts is None:
+            if not self._recompute_prep_artifacts(mark_dirty=False):
+                return False
+        if self.image_prep_state.artifacts is None:
+            return False
+
+        save_processed_bmp(
+            output_path=export_path,
+            image=self.image_prep_state.artifacts.export_bmp_image,
+            dpi=self.image_prep_state.settings.dpi,
+        )
+        metadata = self.converter.inspect_image(export_path, dpi_override=self.image_prep_state.settings.dpi)
+        self.job_state.loaded_file = export_path
+        self.job_state.file_type = "bmp"
+        self.job_state.dpi_override = self.image_prep_state.settings.dpi
+        self.job_state.image_width_mm = metadata.image_width_mm
+        self.job_state.image_height_mm = metadata.image_height_mm
+        self.job_state.image_dpi = metadata.dpi_x
+        self.image_prep_state.dirty = False
+        self._render_image_preview()
+        self._append_log("Image Prep changes detected; refreshed processed BMP before slicing.")
+        return True
+
+    def _on_prep_load_jpg(self) -> None:
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select JPG image",
+            "",
+            "JPEG files (*.jpg *.jpeg);;All files (*.*)",
+        )
+        if not selected_file:
+            return
+        image_path = Path(selected_file)
+        if self._load_prep_source_image(
+            image_path,
+            settings=ImagePrepSettings(dpi=self.DEFAULT_BMP_DPI),
+            mark_dirty=True,
+        ):
+            self._append_log(f"Loaded image prep source: {image_path.name}")
+        self._update_ui_state()
+
+    def _on_prep_load_sidecar(self) -> None:
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select image prep sidecar",
+            "",
+            "Plottrbot sidecar (*.plottrbot-edit.json);;JSON files (*.json);;All files (*.*)",
+        )
+        if not selected_file:
+            return
+        sidecar_path = Path(selected_file)
+        try:
+            source_path, settings, export_bmp_path = read_sidecar(sidecar_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sidecar", f"Could not load sidecar:\n{exc}")
+            return
+
+        if self._load_prep_source_image(
+            source_path,
+            settings=settings,
+            sidecar_path=sidecar_path,
+            export_bmp_path=export_bmp_path,
+            mark_dirty=False,
+        ):
+            self.image_prep_state.dirty = False
+            self._append_log(f"Loaded image prep sidecar: {sidecar_path.name}")
+        self._update_ui_state()
+
+    def _on_prep_save_sidecar(self) -> None:
+        source = self.image_prep_state.source_image_path
+        if source is None:
+            QMessageBox.information(self, "No image", "Load a JPG image first.")
+            return
+        if self.image_prep_state.artifacts is None:
+            if not self._recompute_prep_artifacts(mark_dirty=False):
+                return
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            return
+        sidecar_path = self.image_prep_state.sidecar_path or sidecar_path_for_image(source)
+        write_sidecar(
+            sidecar_path=sidecar_path,
+            source_image_path=source,
+            settings=self.image_prep_state.settings,
+            effective_thresholds=artifacts.effective_thresholds,
+            export_bmp_path=self.image_prep_state.export_bmp_path,
+        )
+        self.image_prep_state.sidecar_path = sidecar_path
+        self._append_log(f"Saved image prep sidecar: {sidecar_path}")
+
+    def _on_prep_save_bmp(self) -> None:
+        if self.image_prep_state.source_image_path is None:
+            QMessageBox.information(self, "No image", "Load a JPG image first.")
+            return
+        if not self._recompute_prep_artifacts(mark_dirty=False):
+            return
+        self._save_prep_bmp()
+        self._update_ui_state()
+
+    def _on_prep_apply_to_control(self) -> None:
+        if self.image_prep_state.source_image_path is None:
+            QMessageBox.information(self, "No image", "Load a JPG image first.")
+            return
+        if not self._recompute_prep_artifacts(mark_dirty=False):
+            return
+        output_path = self._save_prep_bmp()
+        if output_path is None:
+            return
+        self._load_bmp(
+            output_path,
+            dpi_override=self.image_prep_state.settings.dpi,
+            linked_from_prep=True,
+        )
+        self.tab_control.setCurrentWidget(self.control_tab)
+        self._append_log("Applied processed image to Control tab.")
+
+    def _on_prep_settings_changed(self, *_args: object) -> None:
+        if self._prep_updating_controls:
+            return
+        if self.image_prep_state.source_image_path is None:
+            self.image_prep_state.settings = self._read_prep_settings_from_controls()
+            self._update_prep_status_labels()
+            self._update_ui_state()
+            return
+        self._recompute_prep_artifacts(mark_dirty=True)
+        self._update_ui_state()
+
+    def _on_prep_auto_thresholds_toggled(self, *_args: object) -> None:
+        if self._prep_updating_controls:
+            return
+        self.txt_prep_manual_thresholds.setEnabled(not self.checkbox_prep_auto_thresholds.isChecked())
+        self._on_prep_settings_changed()
+
+    def _on_prep_preview_toggle_changed(self, checked: bool) -> None:
+        if self._prep_updating_controls:
+            return
+        self.image_prep_state.settings.show_halftone_preview = checked
+        self._render_prep_preview()
+
+    def _active_draw_prep_context(self) -> dict[str, object] | None:
+        if not self.image_prep_state.linked_to_control:
+            return None
+        if self.image_prep_state.source_image_path is None:
+            return None
+        if self.job_state.loaded_file is None:
+            return None
+        export_path = self.image_prep_state.export_bmp_path
+        if export_path is None:
+            return None
+        try:
+            loaded = self.job_state.loaded_file.resolve()
+            expected = export_path.resolve()
+        except OSError:
+            loaded = self.job_state.loaded_file
+            expected = export_path
+        if loaded != expected:
+            return None
+
+        payload: dict[str, object] = {
+            "source_image_path": str(self.image_prep_state.source_image_path),
+            "settings": self.image_prep_state.settings.to_dict(),
+        }
+        if self.image_prep_state.sidecar_path is not None:
+            payload["sidecar_path"] = str(self.image_prep_state.sidecar_path)
+        if self.image_prep_state.artifacts is not None:
+            payload["effective_thresholds"] = list(self.image_prep_state.artifacts.effective_thresholds)
+        return payload
 
     def _append_log(self, message: str) -> None:
         self.txt_out.appendPlainText(message)
@@ -524,7 +1020,13 @@ class MainWindow(QMainWindow):
             return
         self._load_bmp(Path(selected_file))
 
-    def _load_bmp(self, image_path: Path) -> None:
+    def _load_bmp(
+        self,
+        image_path: Path,
+        *,
+        dpi_override: int | None = None,
+        linked_from_prep: bool = False,
+    ) -> None:
         if image_path.suffix.lower() != ".bmp":
             QMessageBox.information(self, "Not supported", "Only BMP is enabled in phase 1.")
             return
@@ -537,7 +1039,9 @@ class MainWindow(QMainWindow):
         self.job_state.current_send_index = 0
         self.job_state.command_to_line_index.clear()
         self.job_state.line_to_command_index.clear()
-        self.job_state.dpi_override = self.DEFAULT_BMP_DPI
+        self.job_state.dpi_override = (
+            dpi_override if dpi_override is not None and dpi_override > 0 else self.DEFAULT_BMP_DPI
+        )
 
         metadata = self.converter.inspect_image(image_path, dpi_override=self.job_state.dpi_override)
         self.job_state.image_width_mm = metadata.image_width_mm
@@ -557,6 +1061,7 @@ class MainWindow(QMainWindow):
         self.slider_cmd_count.setMaximum(0)
         self.slider_cmd_count.setValue(0)
         self.btn_center_img.setText("Move top left")
+        self.image_prep_state.linked_to_control = linked_from_prep
         self._render_image_preview()
         self._update_ui_state()
 
@@ -609,6 +1114,7 @@ class MainWindow(QMainWindow):
 
     def _on_clear_image(self) -> None:
         self.job_state.clear_image()
+        self.image_prep_state.linked_to_control = False
         self.preview_canvas.clear_all()
         if self.job_state.retained_image is not None:
             self.preview_canvas.set_render_mode("image")
@@ -649,6 +1155,8 @@ class MainWindow(QMainWindow):
     def _on_slice_image(self) -> None:
         if self.job_state.loaded_file is None:
             QMessageBox.information(self, "No image", "Load a BMP image first.")
+            return
+        if not self._refresh_linked_prep_bmp_for_slice():
             return
 
         end_gcode_lines = self._current_end_gcode_lines()
@@ -866,6 +1374,7 @@ class MainWindow(QMainWindow):
                     line_to_command_index=self.job_state.line_to_command_index,
                     machine_profile=asdict(self.settings.machine_profile),
                     serial_port=self.transport.port_name,
+                    image_prep=self._active_draw_prep_context(),
                 )
                 self._append_log(f"Draw session log: {draw_log_path}")
             except Exception as exc:
@@ -1124,6 +1633,8 @@ class MainWindow(QMainWindow):
         stream_paused = stream_status == SendStatus.PAUSED
         interaction_locked = stream_active or self._manual_busy
         retained_available = self.job_state.retained_image is not None
+        prep_has_source = self.image_prep_state.source_image_path is not None
+        prep_has_artifacts = self.image_prep_state.artifacts is not None
         self.current_ui_state = derive_ui_state(
             has_image=has_image,
             is_sliced=is_sliced,
@@ -1143,6 +1654,25 @@ class MainWindow(QMainWindow):
         self.btn_hold_img.setEnabled((has_image or retained_available) and not interaction_locked)
         self.txt_dpi.setEnabled(has_image and not interaction_locked)
         self.btn_update_dpi.setEnabled(has_image and not interaction_locked)
+
+        prep_controls_enabled = not interaction_locked
+        self.btn_prep_load_jpg.setEnabled(prep_controls_enabled)
+        self.btn_prep_load_sidecar.setEnabled(prep_controls_enabled)
+        self.btn_prep_save_sidecar.setEnabled(prep_has_source and prep_controls_enabled)
+        self.btn_prep_save_bmp.setEnabled(prep_has_source and prep_controls_enabled)
+        self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
+        self.spin_prep_dpi.setEnabled(prep_has_source and prep_controls_enabled)
+        self.spin_prep_blur.setEnabled(prep_has_source and prep_controls_enabled)
+        self.spin_prep_levels.setEnabled(prep_has_source and prep_controls_enabled)
+        self.combo_prep_strategy.setEnabled(prep_has_source and prep_controls_enabled)
+        self.checkbox_prep_auto_thresholds.setEnabled(prep_has_source and prep_controls_enabled)
+        self.txt_prep_manual_thresholds.setEnabled(
+            prep_has_source
+            and prep_controls_enabled
+            and (not self.checkbox_prep_auto_thresholds.isChecked())
+        )
+        self.checkbox_prep_halftone_preview.setEnabled(prep_has_source and prep_controls_enabled)
+
         self.combo_port.setEnabled((not usb_connected) and not interaction_locked)
         self.btn_refresh_ports.setEnabled((not usb_connected) and not interaction_locked)
         self.btn_connect.setEnabled(not interaction_locked)
