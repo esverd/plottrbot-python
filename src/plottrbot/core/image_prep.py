@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter
 
 PrepStrategy = Literal["banded", "relative"]
 
@@ -18,6 +18,8 @@ MIN_THRESHOLD_GAP = 8
 SIDECAR_SCHEMA_VERSION = 1
 MAX_RENDER_SIDE_PX = 12000
 MAX_RENDER_PIXELS = 36_000_000
+MIN_CONTRAST_PERCENT = -100
+MAX_CONTRAST_PERCENT = 200
 
 
 def _utc_now_iso() -> str:
@@ -143,6 +145,7 @@ class ImagePrepSettings:
     dpi: int = 35
     target_width_mm: float = 0.0
     target_height_mm: float = 0.0
+    contrast_percent: int = 0
     blur_radius: float = 0.0
     levels: int = 4
     strategy: PrepStrategy = "banded"
@@ -157,6 +160,7 @@ class ImagePrepSettings:
         dpi = max(1, int(round(self.dpi)))
         target_width_mm = max(0.0, float(self.target_width_mm))
         target_height_mm = max(0.0, float(self.target_height_mm))
+        contrast_percent = _clamp(int(round(self.contrast_percent)), MIN_CONTRAST_PERCENT, MAX_CONTRAST_PERCENT)
         blur_radius = max(0.0, float(self.blur_radius))
         auto_thresholds = bool(self.auto_thresholds)
         manual_thresholds = normalize_thresholds(self.manual_thresholds, levels=levels)
@@ -164,6 +168,7 @@ class ImagePrepSettings:
             dpi=dpi,
             target_width_mm=target_width_mm,
             target_height_mm=target_height_mm,
+            contrast_percent=contrast_percent,
             blur_radius=blur_radius,
             levels=levels,
             strategy=strategy,
@@ -183,6 +188,7 @@ class ImagePrepSettings:
             "dpi": int(self.dpi),
             "target_width_mm": float(self.target_width_mm),
             "target_height_mm": float(self.target_height_mm),
+            "contrast_percent": int(self.contrast_percent),
             "blur_radius": float(self.blur_radius),
             "levels": int(self.levels),
             "strategy": self.strategy,
@@ -199,6 +205,11 @@ class ImagePrepSettings:
             dpi=max(1, _coerce_int(payload.get("dpi"), 35)),
             target_width_mm=max(0.0, _coerce_float(payload.get("target_width_mm"), 0.0)),
             target_height_mm=max(0.0, _coerce_float(payload.get("target_height_mm"), 0.0)),
+            contrast_percent=_clamp(
+                _coerce_int(payload.get("contrast_percent"), 0),
+                MIN_CONTRAST_PERCENT,
+                MAX_CONTRAST_PERCENT,
+            ),
             blur_radius=max(0.0, _coerce_float(payload.get("blur_radius"), 0.0)),
             levels=_clamp(_coerce_int(payload.get("levels"), 4), MIN_LEVELS, MAX_LEVELS),
             strategy=strategy,
@@ -304,6 +315,9 @@ def process_image_for_prep(
 
     with Image.open(image_path) as source:
         grayscale = source.convert("L")
+        if sanitized.contrast_percent != 0:
+            contrast_factor = max(0.0, 1.0 + (sanitized.contrast_percent / 100.0))
+            grayscale = ImageEnhance.Contrast(grayscale).enhance(contrast_factor)
         if sanitized.blur_radius > 0.0:
             grayscale = grayscale.filter(ImageFilter.GaussianBlur(radius=sanitized.blur_radius))
         source_width_px, source_height_px = grayscale.size
@@ -314,8 +328,8 @@ def process_image_for_prep(
         target_width_mm = sanitized.target_width_mm if sanitized.target_width_mm > 0.0 else source_width_mm
         target_height_mm = sanitized.target_height_mm if sanitized.target_height_mm > 0.0 else source_height_mm
 
-        target_width_px = max(1, int(round((target_width_mm / 25.4) * sanitized.dpi)))
-        target_height_px = max(1, int(round((target_height_mm / 25.4) * sanitized.dpi)))
+        target_width_px = max(1, int((target_width_mm / 25.4) * sanitized.dpi))
+        target_height_px = max(1, int((target_height_mm / 25.4) * sanitized.dpi))
         if (
             target_width_px > MAX_RENDER_SIDE_PX
             or target_height_px > MAX_RENDER_SIDE_PX
@@ -354,8 +368,8 @@ def process_image_for_prep(
 
     width_mm = (width / sanitized.dpi) * 25.4
     height_mm = (height / sanitized.dpi) * 25.4
-    sanitized.target_width_mm = width_mm
-    sanitized.target_height_mm = height_mm
+    sanitized.target_width_mm = target_width_mm
+    sanitized.target_height_mm = target_height_mm
 
     if not sanitized.auto_thresholds:
         sanitized.manual_thresholds = list(thresholds)

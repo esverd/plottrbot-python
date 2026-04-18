@@ -38,8 +38,8 @@ from plottrbot.core.draw_session_logger import DrawSessionLogger
 from plottrbot.core.image_prep import (
     ImagePrepSettings,
     ImagePrepState,
+    expected_threshold_count,
     is_supported_source_image,
-    parse_threshold_text,
     process_image_for_prep,
     processed_bmp_path_for_image,
     read_sidecar,
@@ -108,6 +108,9 @@ class MainWindow(QMainWindow):
         self.image_prep_state = ImagePrepState()
         self._prep_updating_controls = False
         self._prep_preview_full_pixmap = QPixmap()
+        self._prep_threshold_rows: list[QWidget] = []
+        self._prep_threshold_sliders: list[QSlider] = []
+        self._prep_threshold_value_labels: list[QLabel] = []
 
         self.converter = converter or BmpConverter(self.settings.machine_profile)
         self.bridge = UiBridge()
@@ -152,9 +155,9 @@ class MainWindow(QMainWindow):
         self.image_prep_tab = QWidget()
         self.control_tab = QWidget()
         self.advanced_tab = QWidget()
-        self.tab_control.addTab(self.image_prep_tab, "Image Prep")
         self.tab_control.addTab(self.control_tab, "Control")
         self.tab_control.addTab(self.advanced_tab, "Advanced")
+        self.tab_control.addTab(self.image_prep_tab, "Image Prep")
 
         self._build_image_prep_tab()
         self._build_control_tab()
@@ -225,60 +228,97 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.spin_prep_dpi, 0, 1)
 
         self.spin_prep_width_mm = QDoubleSpinBox()
-        self.spin_prep_width_mm.setRange(1.0, 10000.0)
+        self.spin_prep_width_mm.setRange(1.0, 100000.0)
         self.spin_prep_width_mm.setSingleStep(1.0)
         self.spin_prep_width_mm.setDecimals(1)
+        self.spin_prep_width_mm.setKeyboardTracking(False)
         self.spin_prep_width_mm.setValue(100.0)
         controls_layout.addWidget(QLabel("Width [mm]"), 0, 2)
         controls_layout.addWidget(self.spin_prep_width_mm, 0, 3)
 
-        self.spin_prep_blur = QDoubleSpinBox()
-        self.spin_prep_blur.setRange(0.0, 10.0)
-        self.spin_prep_blur.setSingleStep(0.1)
-        self.spin_prep_blur.setDecimals(1)
-        self.spin_prep_blur.setValue(0.0)
-        controls_layout.addWidget(QLabel("Gaussian blur"), 1, 0)
-        controls_layout.addWidget(self.spin_prep_blur, 1, 1)
-
         self.spin_prep_height_mm = QDoubleSpinBox()
-        self.spin_prep_height_mm.setRange(1.0, 10000.0)
+        self.spin_prep_height_mm.setRange(1.0, 100000.0)
         self.spin_prep_height_mm.setSingleStep(1.0)
         self.spin_prep_height_mm.setDecimals(1)
+        self.spin_prep_height_mm.setKeyboardTracking(False)
         self.spin_prep_height_mm.setValue(100.0)
         controls_layout.addWidget(QLabel("Height [mm]"), 1, 2)
         controls_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
+        controls_layout.addWidget(QLabel("Contrast"), 1, 0)
+        contrast_row = QHBoxLayout()
+        self.slider_prep_contrast = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_contrast.setRange(-100, 200)
+        self.slider_prep_contrast.setValue(0)
+        self.lbl_prep_contrast_value = QLabel("0")
+        self.lbl_prep_contrast_value.setMinimumWidth(45)
+        contrast_row.addWidget(self.slider_prep_contrast, 1)
+        contrast_row.addWidget(self.lbl_prep_contrast_value)
+        controls_layout.addLayout(contrast_row, 1, 1)
+
+        controls_layout.addWidget(QLabel("Blur"), 2, 0)
+        blur_row = QHBoxLayout()
+        self.slider_prep_blur = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_blur.setRange(0, 100)
+        self.slider_prep_blur.setValue(0)
+        self.lbl_prep_blur_value = QLabel("0.0")
+        self.lbl_prep_blur_value.setMinimumWidth(45)
+        blur_row.addWidget(self.slider_prep_blur, 1)
+        blur_row.addWidget(self.lbl_prep_blur_value)
+        controls_layout.addLayout(blur_row, 2, 1)
+
         self.spin_prep_levels = QSpinBox()
         self.spin_prep_levels.setRange(2, 8)
         self.spin_prep_levels.setValue(4)
-        controls_layout.addWidget(QLabel("Levels"), 2, 0)
-        controls_layout.addWidget(self.spin_prep_levels, 2, 1)
+        controls_layout.addWidget(QLabel("Levels"), 3, 0)
+        controls_layout.addWidget(self.spin_prep_levels, 3, 1)
 
         self.combo_prep_strategy = QComboBox()
         self.combo_prep_strategy.addItems(["banded", "relative"])
-        controls_layout.addWidget(QLabel("Threshold strategy"), 2, 2)
-        controls_layout.addWidget(self.combo_prep_strategy, 2, 3)
+        controls_layout.addWidget(QLabel("Threshold strategy"), 3, 2)
+        controls_layout.addWidget(self.combo_prep_strategy, 3, 3)
 
         self.checkbox_prep_lock_aspect = QCheckBox("Lock aspect ratio")
         self.checkbox_prep_lock_aspect.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 3, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 4, 0, 1, 2)
 
         self.checkbox_prep_auto_thresholds = QCheckBox("Use auto thresholds")
         self.checkbox_prep_auto_thresholds.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 3, 2, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 4, 2, 1, 2)
 
         self.checkbox_prep_halftone_preview = QCheckBox("Show halftone preview")
         self.checkbox_prep_halftone_preview.setChecked(False)
-        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 4, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 5, 0, 1, 2)
 
-        controls_layout.addWidget(QLabel("Manual thresholds"), 5, 0)
-        self.txt_prep_manual_thresholds = QLineEdit("")
-        self.txt_prep_manual_thresholds.setPlaceholderText("e.g. 64,128,192")
-        controls_layout.addWidget(self.txt_prep_manual_thresholds, 5, 1, 1, 3)
+        self.lbl_prep_manual_thresholds = QLabel("Manual thresholds")
+        controls_layout.addWidget(self.lbl_prep_manual_thresholds, 6, 0)
+        self.prep_threshold_container = QWidget()
+        threshold_layout = QVBoxLayout(self.prep_threshold_container)
+        threshold_layout.setContentsMargins(0, 0, 0, 0)
+        threshold_layout.setSpacing(4)
+        for index in range(7):
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            label = QLabel(f"T{index + 1}")
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, 255)
+            slider.setValue(0)
+            value_label = QLabel("0")
+            value_label.setMinimumWidth(32)
+            row_layout.addWidget(label)
+            row_layout.addWidget(slider, 1)
+            row_layout.addWidget(value_label)
+            threshold_layout.addWidget(row_widget)
+            self._prep_threshold_rows.append(row_widget)
+            self._prep_threshold_sliders.append(slider)
+            self._prep_threshold_value_labels.append(value_label)
+        controls_layout.addWidget(self.prep_threshold_container, 6, 1, 1, 3)
 
         self.lbl_prep_effective_thresholds = QLabel("Effective thresholds: n/a")
         self.lbl_prep_effective_thresholds.setWordWrap(True)
-        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 6, 0, 1, 4)
+        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 7, 0, 1, 4)
         layout.addWidget(controls_group)
 
         action_row = QHBoxLayout()
@@ -494,12 +534,16 @@ class MainWindow(QMainWindow):
         self.spin_prep_dpi.valueChanged.connect(self._on_prep_settings_changed)
         self.spin_prep_width_mm.valueChanged.connect(self._on_prep_dimension_changed)
         self.spin_prep_height_mm.valueChanged.connect(self._on_prep_dimension_changed)
-        self.spin_prep_blur.valueChanged.connect(self._on_prep_settings_changed)
-        self.spin_prep_levels.valueChanged.connect(self._on_prep_settings_changed)
+        self.slider_prep_contrast.valueChanged.connect(self._on_prep_contrast_slider_changed)
+        self.slider_prep_blur.valueChanged.connect(self._on_prep_blur_slider_changed)
+        self.spin_prep_levels.valueChanged.connect(self._on_prep_levels_changed)
         self.combo_prep_strategy.currentTextChanged.connect(self._on_prep_settings_changed)
         self.checkbox_prep_lock_aspect.toggled.connect(self._on_prep_settings_changed)
         self.checkbox_prep_auto_thresholds.toggled.connect(self._on_prep_auto_thresholds_toggled)
-        self.txt_prep_manual_thresholds.editingFinished.connect(self._on_prep_settings_changed)
+        for index, slider in enumerate(self._prep_threshold_sliders):
+            slider.valueChanged.connect(
+                lambda _value, threshold_index=index: self._on_prep_threshold_slider_changed(threshold_index)
+            )
         self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
 
         self.btn_select_img.clicked.connect(self._on_select_image)
@@ -616,15 +660,39 @@ class MainWindow(QMainWindow):
         return sanitized, clamped
 
     def _update_prep_dimension_spin_limits(self) -> None:
-        max_width, max_height = self._machine_prep_limits()
         self._prep_updating_controls = True
-        self.spin_prep_width_mm.setRange(1.0, max_width)
-        self.spin_prep_height_mm.setRange(1.0, max_height)
-        if self.spin_prep_width_mm.value() > max_width:
-            self.spin_prep_width_mm.setValue(max_width)
-        if self.spin_prep_height_mm.value() > max_height:
-            self.spin_prep_height_mm.setValue(max_height)
+        self.spin_prep_width_mm.setRange(1.0, 100000.0)
+        self.spin_prep_height_mm.setRange(1.0, 100000.0)
         self._prep_updating_controls = False
+
+    def _dialog_start_dir(self) -> str:
+        stored = self.settings.last_open_dir.strip()
+        if not stored:
+            return ""
+        try:
+            candidate = Path(stored)
+            if candidate.is_file():
+                candidate = candidate.parent
+            if candidate.exists():
+                return str(candidate)
+        except OSError:
+            return ""
+        return ""
+
+    def _remember_open_dir(self, selected_path: str | Path) -> None:
+        try:
+            path = Path(selected_path)
+            directory = path.parent if path.suffix else path
+            resolved_dir = directory.resolve()
+        except (TypeError, ValueError, OSError):
+            return
+        if not resolved_dir.exists():
+            return
+        directory_text = str(resolved_dir)
+        if directory_text == self.settings.last_open_dir:
+            return
+        self.settings.last_open_dir = directory_text
+        self.settings_store.save(self.settings)
 
     def _sync_right_preview_panel(self) -> None:
         is_prep_tab = self.tab_control.currentWidget() is self.image_prep_tab
@@ -666,39 +734,72 @@ class MainWindow(QMainWindow):
         height_mm = settings.target_height_mm if settings.target_height_mm > 0.0 else 400.0
         self.spin_prep_width_mm.setValue(width_mm)
         self.spin_prep_height_mm.setValue(height_mm)
-        self.spin_prep_blur.setValue(settings.blur_radius)
+        self.slider_prep_contrast.setValue(settings.contrast_percent)
+        self.slider_prep_blur.setValue(int(round(settings.blur_radius * 10.0)))
         self.spin_prep_levels.setValue(settings.levels)
         self.combo_prep_strategy.setCurrentText(settings.strategy)
         self.checkbox_prep_auto_thresholds.setChecked(settings.auto_thresholds)
-        if settings.manual_thresholds:
-            manual_text = ",".join(str(value) for value in settings.manual_thresholds)
-        else:
-            manual_text = ""
-        self.txt_prep_manual_thresholds.setText(manual_text)
+        self._sync_threshold_slider_rows(settings)
         self.checkbox_prep_halftone_preview.setChecked(settings.show_halftone_preview)
-        self.txt_prep_manual_thresholds.setEnabled(not settings.auto_thresholds)
+        self._update_prep_contrast_label(settings.contrast_percent)
+        self._update_prep_blur_label(self.slider_prep_blur.value())
+        self._set_manual_threshold_controls_visible(not settings.auto_thresholds)
         self._prep_updating_controls = False
         self._update_prep_status_labels()
         self._render_prep_preview()
 
     def _read_prep_settings_from_controls(self) -> ImagePrepSettings:
+        levels = self.spin_prep_levels.value()
         auto_thresholds = self.checkbox_prep_auto_thresholds.isChecked()
         if auto_thresholds:
             manual_thresholds = list(self.image_prep_state.settings.manual_thresholds)
         else:
-            manual_thresholds = parse_threshold_text(self.txt_prep_manual_thresholds.text())
+            manual_thresholds = self._manual_threshold_values_from_sliders(levels)
         settings = ImagePrepSettings(
             dpi=self.spin_prep_dpi.value(),
             target_width_mm=self.spin_prep_width_mm.value(),
             target_height_mm=self.spin_prep_height_mm.value(),
-            blur_radius=self.spin_prep_blur.value(),
-            levels=self.spin_prep_levels.value(),
+            contrast_percent=self.slider_prep_contrast.value(),
+            blur_radius=float(self.slider_prep_blur.value()) / 10.0,
+            levels=levels,
             strategy=self.combo_prep_strategy.currentText().strip().lower(),
             auto_thresholds=auto_thresholds,
             manual_thresholds=manual_thresholds,
             show_halftone_preview=self.checkbox_prep_halftone_preview.isChecked(),
         )
         return settings.sanitized()
+
+    def _update_prep_contrast_label(self, value: int) -> None:
+        self.lbl_prep_contrast_value.setText(str(int(value)))
+
+    def _update_prep_blur_label(self, slider_value: int) -> None:
+        blur_radius = float(slider_value) / 10.0
+        self.lbl_prep_blur_value.setText(f"{blur_radius:.1f}")
+
+    def _set_manual_threshold_controls_visible(self, visible: bool) -> None:
+        self.lbl_prep_manual_thresholds.setVisible(visible)
+        self.prep_threshold_container.setVisible(visible)
+
+    def _sync_threshold_slider_rows(self, settings: ImagePrepSettings) -> None:
+        threshold_count = expected_threshold_count(settings.levels)
+        manual_values = list(settings.manual_thresholds)
+        if len(manual_values) < threshold_count:
+            manual_values = settings.effective_thresholds()[:threshold_count]
+        for index, row in enumerate(self._prep_threshold_rows):
+            active = index < threshold_count
+            row.setVisible(active)
+            if not active:
+                continue
+            value = int(manual_values[index]) if index < len(manual_values) else 0
+            self._prep_threshold_sliders[index].setValue(value)
+            self._prep_threshold_value_labels[index].setText(str(value))
+
+    def _manual_threshold_values_from_sliders(self, levels: int) -> list[int]:
+        threshold_count = expected_threshold_count(levels)
+        return [
+            int(self._prep_threshold_sliders[index].value())
+            for index in range(min(threshold_count, len(self._prep_threshold_sliders)))
+        ]
 
     def _pil_image_to_pixmap(self, image: Image.Image) -> QPixmap:
         buffer = io.BytesIO()
@@ -908,11 +1009,12 @@ class MainWindow(QMainWindow):
         selected_file, _ = QFileDialog.getOpenFileName(
             self,
             "Select JPG image",
-            "",
+            self._dialog_start_dir(),
             "JPEG files (*.jpg *.jpeg);;All files (*.*)",
         )
         if not selected_file:
             return
+        self._remember_open_dir(selected_file)
         image_path = Path(selected_file)
         if self._load_prep_source_image(
             image_path,
@@ -926,11 +1028,12 @@ class MainWindow(QMainWindow):
         selected_file, _ = QFileDialog.getOpenFileName(
             self,
             "Select image prep sidecar",
-            "",
+            self._dialog_start_dir(),
             "Plottrbot sidecar (*.plottrbot-edit.json);;JSON files (*.json);;All files (*.*)",
         )
         if not selected_file:
             return
+        self._remember_open_dir(selected_file)
         sidecar_path = Path(selected_file)
         try:
             source_path, settings, export_bmp_path = read_sidecar(sidecar_path)
@@ -1044,6 +1147,37 @@ class MainWindow(QMainWindow):
         self._prep_updating_controls = False
         self._on_prep_settings_changed()
 
+    def _on_prep_contrast_slider_changed(self, value: int) -> None:
+        self._update_prep_contrast_label(int(value))
+        if self._prep_updating_controls:
+            return
+        self._on_prep_settings_changed()
+
+    def _on_prep_blur_slider_changed(self, value: int) -> None:
+        self._update_prep_blur_label(int(value))
+        if self._prep_updating_controls:
+            return
+        self._on_prep_settings_changed()
+
+    def _on_prep_levels_changed(self, *_args: object) -> None:
+        if self._prep_updating_controls:
+            return
+        settings = self._read_prep_settings_from_controls()
+        self._prep_updating_controls = True
+        self._sync_threshold_slider_rows(settings)
+        self._prep_updating_controls = False
+        self._on_prep_settings_changed()
+
+    def _on_prep_threshold_slider_changed(self, threshold_index: int) -> None:
+        if 0 <= threshold_index < len(self._prep_threshold_sliders):
+            value = int(self._prep_threshold_sliders[threshold_index].value())
+            self._prep_threshold_value_labels[threshold_index].setText(str(value))
+        if self._prep_updating_controls:
+            return
+        if self.checkbox_prep_auto_thresholds.isChecked():
+            return
+        self._on_prep_settings_changed()
+
     def _on_prep_settings_changed(self, *_args: object) -> None:
         if self._prep_updating_controls:
             return
@@ -1058,7 +1192,7 @@ class MainWindow(QMainWindow):
     def _on_prep_auto_thresholds_toggled(self, *_args: object) -> None:
         if self._prep_updating_controls:
             return
-        self.txt_prep_manual_thresholds.setEnabled(not self.checkbox_prep_auto_thresholds.isChecked())
+        self._set_manual_threshold_controls_visible(not self.checkbox_prep_auto_thresholds.isChecked())
         self._on_prep_settings_changed()
 
     def _on_prep_preview_toggle_changed(self, checked: bool) -> None:
@@ -1213,11 +1347,12 @@ class MainWindow(QMainWindow):
         selected_file, _ = QFileDialog.getOpenFileName(
             self,
             "Select BMP image",
-            "",
+            self._dialog_start_dir(),
             "Bitmap files (*.bmp);;All files (*.*)",
         )
         if not selected_file:
             return
+        self._remember_open_dir(selected_file)
         self._load_bmp(Path(selected_file))
 
     def _load_bmp(
@@ -1870,15 +2005,19 @@ class MainWindow(QMainWindow):
         self.spin_prep_width_mm.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_height_mm.setEnabled(prep_has_source and prep_controls_enabled)
         self.checkbox_prep_lock_aspect.setEnabled(prep_has_source and prep_controls_enabled)
-        self.spin_prep_blur.setEnabled(prep_has_source and prep_controls_enabled)
+        self.slider_prep_contrast.setEnabled(prep_has_source and prep_controls_enabled)
+        self.slider_prep_blur.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_levels.setEnabled(prep_has_source and prep_controls_enabled)
         self.combo_prep_strategy.setEnabled(prep_has_source and prep_controls_enabled)
         self.checkbox_prep_auto_thresholds.setEnabled(prep_has_source and prep_controls_enabled)
-        self.txt_prep_manual_thresholds.setEnabled(
+        manual_threshold_controls_enabled = (
             prep_has_source
             and prep_controls_enabled
             and (not self.checkbox_prep_auto_thresholds.isChecked())
         )
+        self.lbl_prep_manual_thresholds.setEnabled(manual_threshold_controls_enabled)
+        for index, slider in enumerate(self._prep_threshold_sliders):
+            slider.setEnabled(manual_threshold_controls_enabled and self._prep_threshold_rows[index].isVisible())
         self.checkbox_prep_halftone_preview.setEnabled(prep_has_source and prep_controls_enabled)
 
         self.combo_port.setEnabled((not usb_connected) and not interaction_locked)

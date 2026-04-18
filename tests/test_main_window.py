@@ -843,7 +843,8 @@ def test_image_prep_sidecar_load_restores_settings(qtbot, settings_store, tmp_pa
         mark_dirty=True,
     )
     window.checkbox_prep_auto_thresholds.setChecked(False)
-    window.txt_prep_manual_thresholds.setText("30,90,150,220")
+    for index, value in enumerate([30, 90, 150, 220]):
+        window._prep_threshold_sliders[index].setValue(value)
     window._on_prep_settings_changed()
     window._on_prep_save_sidecar()
 
@@ -992,7 +993,10 @@ def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
     )
     qtbot.addWidget(window)
 
-    assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
+    assert window.tab_control.tabText(0) == "Control"
+    assert window.tab_control.tabText(1) == "Advanced"
+    assert window.tab_control.tabText(2) == "Image Prep"
+    assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
     window.tab_control.setCurrentWidget(window.control_tab)
     assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
     window.tab_control.setCurrentWidget(window.image_prep_tab)
@@ -1008,3 +1012,90 @@ def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
     window._on_prep_save_bmp()
 
     assert "Saved BMP:" in window.statusBar().currentMessage()
+
+
+def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "sliders.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    window.slider_prep_contrast.setValue(120)
+    window.slider_prep_blur.setValue(15)
+    assert window.image_prep_state.settings.contrast_percent == 120
+    assert window.image_prep_state.settings.blur_radius == pytest.approx(1.5, abs=0.01)
+    assert window.lbl_prep_contrast_value.text() == "120"
+    assert window.lbl_prep_blur_value.text() == "1.5"
+
+    window.checkbox_prep_auto_thresholds.setChecked(False)
+    assert window.prep_threshold_container.isHidden() is False
+    window.spin_prep_levels.setValue(6)
+    visible_threshold_rows = sum(1 for row in window._prep_threshold_rows if not row.isHidden())
+    assert visible_threshold_rows == 5
+
+
+def test_image_prep_dimension_entry_clamps_after_commit(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "typing_clamp.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+    window.checkbox_prep_lock_aspect.setChecked(False)
+    max_height = float(window.settings.machine_profile.canvas_height_mm)
+    assert window.spin_prep_height_mm.maximum() > max_height
+
+    window.spin_prep_height_mm.lineEdit().setText(str(int(max_height * 2)))
+    window.spin_prep_height_mm.interpretText()
+    assert window.spin_prep_height_mm.value() == pytest.approx(max_height, abs=0.01)
+
+
+def test_file_dialogs_use_and_persist_last_open_dir(
+    qtbot, settings_store, tmp_path: Path, monkeypatch
+) -> None:
+    settings = settings_store.load()
+    settings.last_open_dir = str(tmp_path.resolve())
+    settings_store.save(settings)
+
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "remember.bmp"
+    _create_simple_bmp(bmp_path)
+    calls: list[str] = []
+
+    def _fake_open_file_name(_parent, _title, start_dir, *_args):
+        calls.append(str(start_dir))
+        return (str(bmp_path), "Bitmap files (*.bmp)")
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", _fake_open_file_name)
+    window._on_select_image()
+
+    assert calls
+    assert Path(calls[0]).resolve() == tmp_path.resolve()
+    assert settings_store.load().last_open_dir == str(tmp_path.resolve())

@@ -36,6 +36,7 @@ class AppSettings:
     )
     motor_power_commands_enabled: bool = True
     last_port: str = ""
+    last_open_dir: str = ""
     window_width: int = 1600
     window_height: int = 1000
 
@@ -83,6 +84,7 @@ class SettingsStore:
             end_gcode_lines=end_gcode,
             motor_power_commands_enabled=bool(raw.get("motor_power_commands_enabled", True)),
             last_port=str(raw.get("last_port", "")),
+            last_open_dir=str(raw.get("last_open_dir", "")),
             window_width=int(raw.get("window_width", 1600)),
             window_height=int(raw.get("window_height", 1000)),
         )
