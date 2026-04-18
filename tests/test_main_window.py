@@ -1009,9 +1009,13 @@ def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
         settings=ImagePrepSettings(dpi=35),
         mark_dirty=True,
     )
-    window._on_prep_save_bmp()
+    window._on_prep_save_outputs()
 
-    assert "Saved BMP:" in window.statusBar().currentMessage()
+    export_path = window.image_prep_state.export_bmp_path
+    sidecar_path = window.image_prep_state.sidecar_path
+    assert export_path is not None and export_path.exists()
+    assert sidecar_path is not None and sidecar_path.exists()
+    assert "Saved" in window.statusBar().currentMessage()
 
 
 def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp_path: Path) -> None:
@@ -1033,16 +1037,72 @@ def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp
 
     window.slider_prep_contrast.setValue(120)
     window.slider_prep_blur.setValue(15)
-    assert window.image_prep_state.settings.contrast_percent == 120
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.contrast_percent == 120, timeout=1500)
     assert window.image_prep_state.settings.blur_radius == pytest.approx(1.5, abs=0.01)
-    assert window.lbl_prep_contrast_value.text() == "120"
-    assert window.lbl_prep_blur_value.text() == "1.5"
+    assert window.spin_prep_contrast.value() == 120
+    assert window.spin_prep_blur.value() == pytest.approx(1.5, abs=0.01)
 
     window.checkbox_prep_auto_thresholds.setChecked(False)
     assert window.prep_threshold_container.isHidden() is False
     window.spin_prep_levels.setValue(6)
     visible_threshold_rows = sum(1 for row in window._prep_threshold_rows if not row.isHidden())
     assert visible_threshold_rows == 5
+
+
+def test_image_prep_manual_contrast_above_slider_max(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "contrast_overflow.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    window.spin_prep_contrast.setValue(450)
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.contrast_percent == 450, timeout=1500)
+    assert window.slider_prep_contrast.value() == 300
+
+
+def test_image_prep_reset_defaults_restores_core_controls(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "reset.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=60),
+        mark_dirty=True,
+    )
+
+    window.spin_prep_contrast.setValue(220)
+    window.spin_prep_blur.setValue(3.4)
+    window.spin_prep_levels.setValue(6)
+    window.combo_prep_strategy.setCurrentText("relative")
+    window.checkbox_prep_auto_thresholds.setChecked(False)
+    window.checkbox_prep_lock_aspect.setChecked(False)
+    window._on_prep_reset_defaults()
+
+    assert window.spin_prep_dpi.value() == 35
+    assert window.spin_prep_contrast.value() == 0
+    assert window.spin_prep_blur.value() == pytest.approx(0.0, abs=0.01)
+    assert window.spin_prep_levels.value() == 4
+    assert window.combo_prep_strategy.currentText() == "banded"
+    assert window.checkbox_prep_auto_thresholds.isChecked() is True
+    assert window.checkbox_prep_lock_aspect.isChecked() is True
 
 
 def test_image_prep_dimension_entry_clamps_after_commit(qtbot, settings_store, tmp_path: Path) -> None:

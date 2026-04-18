@@ -157,3 +157,23 @@ def test_overly_large_prep_render_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="too large"):
         process_image_for_prep(image_path=image_path, settings=settings)
+
+
+def test_contrast_allows_values_above_slider_range(tmp_path: Path) -> None:
+    image_path = tmp_path / "contrast.jpg"
+    _create_gradient_jpg(image_path, width=64, height=64)
+
+    settings = ImagePrepSettings(
+        dpi=35,
+        target_width_mm=120.0,
+        target_height_mm=120.0,
+        contrast_percent=450,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=True,
+    )
+    sanitized, artifacts = process_image_for_prep(image_path=image_path, settings=settings)
+
+    assert sanitized.contrast_percent == 450
+    assert artifacts.image_width_px > 0
+    assert artifacts.image_height_px > 0
