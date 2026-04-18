@@ -270,10 +270,10 @@ class MainWindow(QMainWindow):
         blur_row = QHBoxLayout()
         blur_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_blur = QSlider(Qt.Orientation.Horizontal)
-        self.slider_prep_blur.setRange(0, 200)
+        self.slider_prep_blur.setRange(0, 100)
         self.slider_prep_blur.setValue(0)
         self.spin_prep_blur = QDoubleSpinBox()
-        self.spin_prep_blur.setRange(0.0, 20.0)
+        self.spin_prep_blur.setRange(0.0, 10.0)
         self.spin_prep_blur.setSingleStep(0.1)
         self.spin_prep_blur.setDecimals(1)
         self.spin_prep_blur.setKeyboardTracking(False)
@@ -723,6 +723,19 @@ class MainWindow(QMainWindow):
         self.settings.last_open_dir = directory_text
         self.settings_store.save(self.settings)
 
+    def _next_non_overwriting_save_paths(self, base_bmp_path: Path, base_sidecar_path: Path) -> tuple[Path, Path]:
+        if not base_bmp_path.exists() and not base_sidecar_path.exists():
+            return base_bmp_path, base_sidecar_path
+        for index in range(1, 10000):
+            suffix = f"-{index:03d}"
+            bmp_candidate = base_bmp_path.with_name(f"{base_bmp_path.stem}{suffix}{base_bmp_path.suffix}")
+            sidecar_candidate = base_sidecar_path.with_name(
+                f"{base_sidecar_path.stem}{suffix}{base_sidecar_path.suffix}"
+            )
+            if not bmp_candidate.exists() and not sidecar_candidate.exists():
+                return bmp_candidate, sidecar_candidate
+        raise RuntimeError("Could not find an available filename for image prep save output.")
+
     def _sync_right_preview_panel(self) -> None:
         is_prep_tab = self.tab_control.currentWidget() is self.image_prep_tab
         self.right_preview_stack.setCurrentWidget(
@@ -986,6 +999,18 @@ class MainWindow(QMainWindow):
                 self.job_state.image_height_mm = metadata.image_height_mm
                 self.job_state.image_dpi = metadata.dpi_x
                 self._render_image_preview()
+            elif self.image_prep_state.linked_to_control:
+                metadata = self.converter.inspect_image(
+                    output_path,
+                    dpi_override=self.image_prep_state.settings.dpi,
+                )
+                self.job_state.loaded_file = output_path
+                self.job_state.file_type = "bmp"
+                self.job_state.dpi_override = self.image_prep_state.settings.dpi
+                self.job_state.image_width_mm = metadata.image_width_mm
+                self.job_state.image_height_mm = metadata.image_height_mm
+                self.job_state.image_dpi = metadata.dpi_x
+                self._render_image_preview()
         self._append_log(f"Saved processed BMP: {output_path}")
         if show_toast:
             self._show_toast(f"Saved BMP: {output_path.name}")
@@ -1105,24 +1130,20 @@ class MainWindow(QMainWindow):
             self._append_log(f"Loaded image prep sidecar: {sidecar_path.name}")
         self._update_ui_state()
 
-    def _on_prep_save_sidecar(self) -> None:
-        self._save_prep_sidecar()
-
-    def _on_prep_save_bmp(self) -> None:
-        if self.image_prep_state.source_image_path is None:
-            QMessageBox.information(self, "No image", "Load a JPG image first.")
-            return
-        if not self._recompute_prep_artifacts(mark_dirty=False):
-            return
-        self._save_prep_bmp()
-        self._update_ui_state()
-
     def _on_prep_save_outputs(self) -> None:
         if self.image_prep_state.source_image_path is None:
             QMessageBox.information(self, "No image", "Load a JPG image first.")
             return
         if not self._recompute_prep_artifacts(mark_dirty=False):
             return
+        source = self.image_prep_state.source_image_path
+        if source is None:
+            return
+        base_bmp_path = processed_bmp_path_for_image(source)
+        base_sidecar_path = sidecar_path_for_image(source)
+        save_bmp_path, save_sidecar_path = self._next_non_overwriting_save_paths(base_bmp_path, base_sidecar_path)
+        self.image_prep_state.export_bmp_path = save_bmp_path
+        self.image_prep_state.sidecar_path = save_sidecar_path
         bmp_path = self._save_prep_bmp(show_toast=False)
         sidecar_path = self._save_prep_sidecar()
         if bmp_path is None or sidecar_path is None:

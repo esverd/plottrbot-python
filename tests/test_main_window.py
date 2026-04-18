@@ -846,7 +846,7 @@ def test_image_prep_sidecar_load_restores_settings(qtbot, settings_store, tmp_pa
     for index, value in enumerate([30, 90, 150, 220]):
         window._prep_threshold_sliders[index].setValue(value)
     window._on_prep_settings_changed()
-    window._on_prep_save_sidecar()
+    window._save_prep_sidecar()
 
     sidecar_path = window.image_prep_state.sidecar_path
     assert sidecar_path is not None
@@ -886,13 +886,13 @@ def test_halftone_preview_toggle_does_not_change_export_bmp(qtbot, settings_stor
         settings=ImagePrepSettings(dpi=35, levels=4),
         mark_dirty=True,
     )
-    window._on_prep_save_bmp()
+    window._save_prep_bmp(show_toast=False)
     export_path = window.image_prep_state.export_bmp_path
     assert export_path is not None
     before = export_path.read_bytes()
 
     window.checkbox_prep_halftone_preview.setChecked(True)
-    window._on_prep_save_bmp()
+    window._save_prep_bmp(show_toast=False)
     after = export_path.read_bytes()
 
     assert before == after
@@ -1018,6 +1018,47 @@ def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
     assert "Saved" in window.statusBar().currentMessage()
 
 
+def test_image_prep_save_outputs_creates_versioned_files_without_overwrite(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "versioned.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+
+    window._on_prep_save_outputs()
+    first_bmp = window.image_prep_state.export_bmp_path
+    first_sidecar = window.image_prep_state.sidecar_path
+    assert first_bmp is not None and first_bmp.exists()
+    assert first_sidecar is not None and first_sidecar.exists()
+
+    window._on_prep_save_outputs()
+    second_bmp = window.image_prep_state.export_bmp_path
+    second_sidecar = window.image_prep_state.sidecar_path
+    assert second_bmp is not None and second_bmp.exists()
+    assert second_sidecar is not None and second_sidecar.exists()
+    assert second_bmp != first_bmp
+    assert second_sidecar != first_sidecar
+    assert "-001" in second_bmp.name
+    assert "-001" in second_sidecar.name
+
+    first_sidecar_payload = json.loads(first_sidecar.read_text(encoding="utf-8"))
+    second_sidecar_payload = json.loads(second_sidecar.read_text(encoding="utf-8"))
+    assert Path(first_sidecar_payload["export_bmp_path"]).name == first_bmp.name
+    assert Path(second_sidecar_payload["export_bmp_path"]).name == second_bmp.name
+
+
 def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp_path: Path) -> None:
     window = MainWindow(
         settings_store=settings_store,
@@ -1047,6 +1088,8 @@ def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp
     window.spin_prep_levels.setValue(6)
     visible_threshold_rows = sum(1 for row in window._prep_threshold_rows if not row.isHidden())
     assert visible_threshold_rows == 5
+    assert window.slider_prep_blur.maximum() == 100
+    assert window.spin_prep_blur.maximum() == pytest.approx(10.0, abs=0.01)
 
 
 def test_image_prep_manual_contrast_above_slider_max(qtbot, settings_store, tmp_path: Path) -> None:
