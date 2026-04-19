@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -41,22 +40,29 @@ class PrepPreviewWidget(QLabel):
         y = (self.height() - size.height()) / 2.0
         return QRectF(x, y, size.width(), size.height())
 
-    def _mask_geometry(self, mask: ImagePrepMask) -> tuple[QPointF, float]:
+    def _mask_geometry(self, mask: ImagePrepMask) -> tuple[QPointF, QRectF, float]:
         rect = self._pixmap_rect()
-        span = max(1.0, min(rect.width(), rect.height()))
         center = QPointF(
             rect.left() + (mask.center_x * rect.width()),
             rect.top() + (mask.center_y * rect.height()),
         )
-        return center, max(4.0, mask.radius * span)
+        mask_width = max(8.0, mask.width * rect.width())
+        mask_height = max(8.0, mask.height * rect.height())
+        mask_rect = QRectF(
+            center.x() - (mask_width / 2.0),
+            center.y() - (mask_height / 2.0),
+            mask_width,
+            mask_height,
+        )
+        corner_radius = (min(mask_width, mask_height) / 2.0) * (mask.roundness_percent / 100.0)
+        return center, mask_rect, max(0.0, corner_radius)
 
     def _mask_at(self, point: QPointF) -> int:
         if self._pixmap_rect().isEmpty():
             return -1
         for index in range(len(self._masks) - 1, -1, -1):
-            center, radius = self._mask_geometry(self._masks[index])
-            distance = math.hypot(point.x() - center.x(), point.y() - center.y())
-            if distance <= radius + 6.0:
+            _center, mask_rect, _corner_radius = self._mask_geometry(self._masks[index])
+            if mask_rect.adjusted(-6.0, -6.0, 6.0, 6.0).contains(point):
                 return index
         return -1
 
@@ -79,12 +85,12 @@ class PrepPreviewWidget(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         for index, mask in enumerate(self._masks):
-            center, radius = self._mask_geometry(mask)
+            center, mask_rect, corner_radius = self._mask_geometry(mask)
             selected = index == self._selected_index
             color = QColor(21, 111, 191, 230) if selected else QColor(70, 86, 106, 170)
             painter.setPen(QPen(color, 3 if selected else 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(center, radius, radius)
+            painter.drawRoundedRect(mask_rect, corner_radius, corner_radius)
             painter.setPen(QPen(color, 1))
             painter.drawLine(QPointF(center.x() - 7, center.y()), QPointF(center.x() + 7, center.y()))
             painter.drawLine(QPointF(center.x(), center.y() - 7), QPointF(center.x(), center.y() + 7))

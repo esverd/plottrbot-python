@@ -1198,7 +1198,9 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert window.prep_mask_settings_panel.isHidden() is False
     assert "Mask 1 of 1" in window.lbl_prep_mask_status.text()
 
-    window.slider_prep_mask_radius.setValue(35)
+    window.slider_prep_mask_width.setValue(55)
+    window.slider_prep_mask_height.setValue(35)
+    window.slider_prep_mask_roundness.setValue(75)
     window.slider_prep_mask_feather.setValue(8)
     window.slider_prep_mask_exposure.setValue(-20)
     window.slider_prep_mask_contrast.setValue(240)
@@ -1208,11 +1210,15 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
         timeout=1500,
     )
     mask = window.image_prep_state.settings.local_masks[0]
-    assert mask.radius == pytest.approx(0.35, abs=0.01)
+    assert mask.width == pytest.approx(0.55, abs=0.01)
+    assert mask.height == pytest.approx(0.35, abs=0.01)
+    assert mask.roundness_percent == 75
     assert mask.feather == pytest.approx(0.08, abs=0.01)
     assert mask.exposure_percent == -20
     assert mask.blur_radius == pytest.approx(1.7, abs=0.01)
-    assert window.lbl_prep_mask_radius_value.text() == "35%"
+    assert window.lbl_prep_mask_width_value.text() == "55%"
+    assert window.lbl_prep_mask_height_value.text() == "35%"
+    assert window.lbl_prep_mask_roundness_value.text() == "75%"
     assert window.lbl_prep_mask_feather_value.text() == "8%"
     assert window.lbl_prep_mask_exposure_value.text() == "-20"
     assert window.lbl_prep_mask_contrast_value.text() == "+240"
@@ -1229,6 +1235,9 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert sidecar_path is not None
     _, loaded_settings, _ = read_sidecar(sidecar_path)
     assert len(loaded_settings.local_masks) == 1
+    assert loaded_settings.local_masks[0].width == pytest.approx(0.55, abs=0.01)
+    assert loaded_settings.local_masks[0].height == pytest.approx(0.35, abs=0.01)
+    assert loaded_settings.local_masks[0].roundness_percent == 75
     assert loaded_settings.local_masks[0].exposure_percent == -20
     assert loaded_settings.local_masks[0].contrast_percent == 240
 

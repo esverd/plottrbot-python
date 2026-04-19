@@ -158,16 +158,25 @@ class ImagePrepMask:
     center_x: float = 0.5
     center_y: float = 0.5
     radius: float = 0.2
+    width: float = 0.0
+    height: float = 0.0
+    roundness_percent: int = 100
     feather: float = 0.04
     exposure_percent: int = 0
     contrast_percent: int = 0
     blur_radius: float = 0.0
 
     def sanitized(self) -> ImagePrepMask:
+        legacy_radius = _clamp_float(self.radius, 0.01, 1.0)
+        width = _clamp_float(self.width if self.width > 0.0 else legacy_radius * 2.0, 0.01, 1.0)
+        height = _clamp_float(self.height if self.height > 0.0 else legacy_radius * 2.0, 0.01, 1.0)
         return ImagePrepMask(
             center_x=_clamp_float(self.center_x, 0.0, 1.0),
             center_y=_clamp_float(self.center_y, 0.0, 1.0),
-            radius=_clamp_float(self.radius, 0.01, 1.0),
+            radius=min(width, height) / 2.0,
+            width=width,
+            height=height,
+            roundness_percent=_clamp(int(round(self.roundness_percent)), 0, 100),
             feather=_clamp_float(self.feather, 0.0, 0.5),
             exposure_percent=_clamp(
                 int(round(self.exposure_percent)),
@@ -187,6 +196,9 @@ class ImagePrepMask:
             "center_x": float(self.center_x),
             "center_y": float(self.center_y),
             "radius": float(self.radius),
+            "width": float(self.width),
+            "height": float(self.height),
+            "roundness_percent": int(self.roundness_percent),
             "feather": float(self.feather),
             "exposure_percent": int(self.exposure_percent),
             "contrast_percent": int(self.contrast_percent),
@@ -199,6 +211,9 @@ class ImagePrepMask:
             center_x=_coerce_float(payload.get("center_x"), 0.5),
             center_y=_coerce_float(payload.get("center_y"), 0.5),
             radius=_coerce_float(payload.get("radius"), 0.2),
+            width=_coerce_float(payload.get("width"), 0.0),
+            height=_coerce_float(payload.get("height"), 0.0),
+            roundness_percent=_coerce_int(payload.get("roundness_percent", payload.get("roundness")), 100),
             feather=_coerce_float(payload.get("feather"), 0.04),
             exposure_percent=_coerce_int(payload.get("exposure_percent"), 0),
             contrast_percent=_coerce_int(payload.get("contrast_percent"), 0),
@@ -391,25 +406,27 @@ def _build_line_halftone_pixels(
     return output
 
 
-def _circle_mask_image(
+def _local_mask_image(
     *,
     size: tuple[int, int],
     prep_mask: ImagePrepMask,
 ) -> Image.Image:
     width, height = size
     span = max(1, min(width, height))
-    radius_px = max(1.0, prep_mask.radius * span)
+    mask_width_px = max(1.0, prep_mask.width * width)
+    mask_height_px = max(1.0, prep_mask.height * height)
     center_x = prep_mask.center_x * max(width - 1, 1)
     center_y = prep_mask.center_y * max(height - 1, 1)
+    left = center_x - (mask_width_px / 2.0)
+    top = center_y - (mask_height_px / 2.0)
+    right = center_x + (mask_width_px / 2.0)
+    bottom = center_y + (mask_height_px / 2.0)
+    corner_radius = (min(mask_width_px, mask_height_px) / 2.0) * (prep_mask.roundness_percent / 100.0)
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
-    draw.ellipse(
-        (
-            center_x - radius_px,
-            center_y - radius_px,
-            center_x + radius_px,
-            center_y + radius_px,
-        ),
+    draw.rounded_rectangle(
+        (left, top, right, bottom),
+        radius=max(0.0, corner_radius),
         fill=255,
     )
     feather_px = prep_mask.feather * span
@@ -465,7 +482,7 @@ def _apply_local_masks(
                 contrast_percent=mask.contrast_percent,
                 blur_radius=mask.blur_radius,
             )
-        alpha = _circle_mask_image(size=result.size, prep_mask=mask)
+        alpha = _local_mask_image(size=result.size, prep_mask=mask)
         result = Image.composite(local_adjusted, result, alpha)
     return result
 
