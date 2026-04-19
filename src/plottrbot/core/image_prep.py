@@ -403,17 +403,25 @@ def _apply_local_masks(
     base_image: Image.Image,
     source_image: Image.Image,
     masks: list[ImagePrepMask],
+    global_contrast_percent: int,
+    global_blur_radius: float,
 ) -> Image.Image:
     if not masks:
         return base_image
     result = base_image.copy()
     for prep_mask in masks:
         mask = prep_mask.sanitized()
-        local_adjusted = _adjust_grayscale(
-            source_image,
-            contrast_percent=mask.contrast_percent,
-            blur_radius=mask.blur_radius,
-        )
+        if (
+            mask.contrast_percent == global_contrast_percent
+            and abs(mask.blur_radius - global_blur_radius) < 0.001
+        ):
+            local_adjusted = base_image
+        else:
+            local_adjusted = _adjust_grayscale(
+                source_image,
+                contrast_percent=mask.contrast_percent,
+                blur_radius=mask.blur_radius,
+            )
         alpha = _circle_mask_image(size=result.size, prep_mask=mask)
         result = Image.composite(local_adjusted, result, alpha)
     return result
@@ -467,6 +475,8 @@ def process_image_for_prep(
             base_image=grayscale,
             source_image=raw_grayscale,
             masks=sanitized.local_masks,
+            global_contrast_percent=sanitized.contrast_percent,
+            global_blur_radius=sanitized.blur_radius,
         )
 
         width, height = grayscale.size

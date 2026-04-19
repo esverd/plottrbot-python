@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from plottrbot.config.settings import default_end_gcode_lines
-from plottrbot.core.image_prep import ImagePrepSettings
+from plottrbot.core.image_prep import ImagePrepSettings, read_sidecar
 from plottrbot.serial.nano_transport import AckResult
 from plottrbot.serial.program_streamer import SendSessionState, SendStatus
 from plottrbot.ui.main_window import MainWindow
@@ -1160,6 +1160,58 @@ def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp
     assert visible_threshold_rows == 5
     assert window.slider_prep_blur.maximum() == 100
     assert window.spin_prep_blur.maximum() == pytest.approx(10.0, abs=0.01)
+
+
+def test_image_prep_local_mask_controls_update_settings_and_sidecar(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "local_mask.jpg"
+    _create_simple_jpg(jpg_path)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+    window._update_ui_state()
+
+    qtbot.mouseClick(window.btn_prep_add_mask, Qt.MouseButton.LeftButton)
+    assert len(window.image_prep_state.settings.local_masks) == 1
+    assert window._selected_prep_mask_index == 0
+    assert "Mask 1 of 1" in window.lbl_prep_mask_status.text()
+
+    window.spin_prep_mask_radius.setValue(35.0)
+    window.spin_prep_mask_feather.setValue(8.0)
+    window.spin_prep_mask_contrast.setValue(240)
+    window.spin_prep_mask_blur.setValue(1.7)
+    qtbot.waitUntil(
+        lambda: window.image_prep_state.settings.local_masks[0].contrast_percent == 240,
+        timeout=1500,
+    )
+    mask = window.image_prep_state.settings.local_masks[0]
+    assert mask.radius == pytest.approx(0.35, abs=0.01)
+    assert mask.feather == pytest.approx(0.08, abs=0.01)
+    assert mask.blur_radius == pytest.approx(1.7, abs=0.01)
+
+    window._on_prep_mask_moved(0, 0.25, 0.75)
+    qtbot.waitUntil(
+        lambda: window.image_prep_state.settings.local_masks[0].center_x == pytest.approx(0.25, abs=0.01),
+        timeout=1500,
+    )
+    assert window.image_prep_state.settings.local_masks[0].center_y == pytest.approx(0.75, abs=0.01)
+
+    sidecar_path = window._save_prep_sidecar()
+    assert sidecar_path is not None
+    _, loaded_settings, _ = read_sidecar(sidecar_path)
+    assert len(loaded_settings.local_masks) == 1
+    assert loaded_settings.local_masks[0].contrast_percent == 240
 
 
 def test_image_prep_manual_contrast_above_slider_max(qtbot, settings_store, tmp_path: Path) -> None:

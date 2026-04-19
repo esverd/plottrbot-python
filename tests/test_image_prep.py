@@ -170,6 +170,44 @@ def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> Non
     assert masked_tonal.getpixel(corner) == base_tonal.getpixel(corner)
 
 
+def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
+    image_path = tmp_path / "noop_mask.jpg"
+    _create_gradient_jpg(image_path, width=60, height=60)
+
+    base_settings = ImagePrepSettings(
+        dpi=35,
+        contrast_percent=120,
+        blur_radius=1.2,
+        levels=4,
+        strategy="relative",
+        auto_thresholds=True,
+    )
+    masked_settings = ImagePrepSettings(
+        dpi=35,
+        contrast_percent=120,
+        blur_radius=1.2,
+        levels=4,
+        strategy="relative",
+        auto_thresholds=True,
+        local_masks=[
+            ImagePrepMask(
+                center_x=0.5,
+                center_y=0.5,
+                radius=0.3,
+                feather=0.08,
+                contrast_percent=120,
+                blur_radius=1.2,
+            )
+        ],
+    )
+
+    _, base_artifacts = process_image_for_prep(image_path=image_path, settings=base_settings)
+    _, masked_artifacts = process_image_for_prep(image_path=image_path, settings=masked_settings)
+
+    assert masked_artifacts.tonal_preview_image.tobytes() == base_artifacts.tonal_preview_image.tobytes()
+    assert masked_artifacts.export_bmp_image.tobytes() == base_artifacts.export_bmp_image.tobytes()
+
+
 def test_dimensions_and_dpi_control_processed_resolution(tmp_path: Path) -> None:
     image_path = tmp_path / "sized.jpg"
     _create_gradient_jpg(image_path, width=100, height=60)

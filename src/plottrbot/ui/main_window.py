@@ -3,7 +3,7 @@ from __future__ import annotations
 import bisect
 import io
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
@@ -36,6 +36,7 @@ from plottrbot.config.settings import SettingsStore, default_end_gcode_lines, us
 from plottrbot.core.bmp_converter import BmpConverter
 from plottrbot.core.draw_session_logger import DrawSessionLogger
 from plottrbot.core.image_prep import (
+    ImagePrepMask,
     ImagePrepSettings,
     ImagePrepState,
     expected_threshold_count,
@@ -53,6 +54,7 @@ from plottrbot.serial.dummy_transport import DummyTransport
 from plottrbot.serial.nano_transport import NanoTransport
 from plottrbot.serial.program_streamer import ProgramStreamer, SendSessionState, SendStatus
 from plottrbot.system.sleep_inhibitor import SleepInhibitor
+from plottrbot.ui.prep_preview_widget import PrepPreviewWidget
 from plottrbot.ui.preview_canvas import PreviewCanvas
 
 
@@ -114,6 +116,8 @@ class MainWindow(QMainWindow):
         self._prep_threshold_sliders: list[QSlider] = []
         self._prep_threshold_spinboxes: list[QSpinBox] = []
         self._prep_slider_syncing = False
+        self._prep_mask_controls_syncing = False
+        self._selected_prep_mask_index = -1
         self._prep_recompute_timer = QTimer(self)
         self._prep_recompute_timer.setSingleShot(True)
         self._prep_recompute_timer.setInterval(80)
@@ -259,7 +263,7 @@ class MainWindow(QMainWindow):
         preview_header_layout.addWidget(self.btn_zoom_in)
         preview_panel_layout.addWidget(preview_header, 0)
 
-        self.prep_preview_label = QLabel("Load a JPG to begin.")
+        self.prep_preview_label = PrepPreviewWidget("Load a JPG to begin.")
         self.prep_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.prep_preview_label.setMinimumSize(1, 1)
         self.prep_preview_scroll = QScrollArea()
@@ -443,6 +447,53 @@ class MainWindow(QMainWindow):
         self.lbl_prep_effective_thresholds.setWordWrap(True)
         controls_layout.addWidget(self.lbl_prep_effective_thresholds, 8, 0, 1, 4)
         layout.addWidget(controls_group)
+
+        mask_group = QGroupBox("Local adjustments")
+        mask_layout = QGridLayout(mask_group)
+        mask_layout.setColumnStretch(1, 1)
+        mask_layout.setColumnStretch(3, 1)
+
+        mask_buttons = QHBoxLayout()
+        self.btn_prep_add_mask = QPushButton("Add mask")
+        self.btn_prep_remove_mask = QPushButton("Remove mask")
+        mask_buttons.addWidget(self.btn_prep_add_mask)
+        mask_buttons.addWidget(self.btn_prep_remove_mask)
+        mask_layout.addLayout(mask_buttons, 0, 0, 1, 4)
+
+        self.lbl_prep_mask_status = QLabel("No local mask selected.")
+        self.lbl_prep_mask_status.setObjectName("secondaryInfo")
+        self.lbl_prep_mask_status.setWordWrap(True)
+        mask_layout.addWidget(self.lbl_prep_mask_status, 1, 0, 1, 4)
+
+        self.spin_prep_mask_radius = QDoubleSpinBox()
+        self.spin_prep_mask_radius.setRange(1.0, 100.0)
+        self.spin_prep_mask_radius.setSingleStep(1.0)
+        self.spin_prep_mask_radius.setDecimals(1)
+        self.spin_prep_mask_radius.setSuffix("%")
+        mask_layout.addWidget(QLabel("Radius"), 2, 0)
+        mask_layout.addWidget(self.spin_prep_mask_radius, 2, 1)
+
+        self.spin_prep_mask_feather = QDoubleSpinBox()
+        self.spin_prep_mask_feather.setRange(0.0, 50.0)
+        self.spin_prep_mask_feather.setSingleStep(1.0)
+        self.spin_prep_mask_feather.setDecimals(1)
+        self.spin_prep_mask_feather.setSuffix("%")
+        mask_layout.addWidget(QLabel("Feather"), 2, 2)
+        mask_layout.addWidget(self.spin_prep_mask_feather, 2, 3)
+
+        self.spin_prep_mask_contrast = QSpinBox()
+        self.spin_prep_mask_contrast.setRange(-100, 1000)
+        self.spin_prep_mask_contrast.setSingleStep(5)
+        mask_layout.addWidget(QLabel("Local contrast"), 3, 0)
+        mask_layout.addWidget(self.spin_prep_mask_contrast, 3, 1)
+
+        self.spin_prep_mask_blur = QDoubleSpinBox()
+        self.spin_prep_mask_blur.setRange(0.0, 10.0)
+        self.spin_prep_mask_blur.setSingleStep(0.1)
+        self.spin_prep_mask_blur.setDecimals(1)
+        mask_layout.addWidget(QLabel("Local blur"), 3, 2)
+        mask_layout.addWidget(self.spin_prep_mask_blur, 3, 3)
+        layout.addWidget(mask_group)
 
         action_row = QHBoxLayout()
         self.btn_prep_save_outputs = QPushButton("Export BMP + sidecar")
@@ -841,6 +892,14 @@ class MainWindow(QMainWindow):
                 lambda _value, threshold_index=index: self._on_prep_threshold_spin_changed(threshold_index)
             )
         self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
+        self.btn_prep_add_mask.clicked.connect(self._on_prep_add_mask)
+        self.btn_prep_remove_mask.clicked.connect(self._on_prep_remove_mask)
+        self.spin_prep_mask_radius.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.spin_prep_mask_feather.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.spin_prep_mask_contrast.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.spin_prep_mask_blur.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.prep_preview_label.maskSelected.connect(self._on_prep_mask_selected)
+        self.prep_preview_label.maskMoved.connect(self._on_prep_mask_moved)
 
         self.btn_select_img.clicked.connect(self._on_select_image)
         self.btn_move_img.clicked.connect(self._on_move_image)
@@ -1097,6 +1156,10 @@ class MainWindow(QMainWindow):
         )
         self.prep_preview_label.setPixmap(fitted)
         self.prep_preview_label.resize(fitted.size())
+        self.prep_preview_label.set_masks(
+            self.image_prep_state.settings.local_masks,
+            self._selected_prep_mask_index,
+        )
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self.prep_preview_scroll.viewport() and event.type() == QEvent.Type.Resize:
@@ -1131,6 +1194,7 @@ class MainWindow(QMainWindow):
         self._prep_slider_syncing = False
         self._set_manual_threshold_controls_visible(not settings.auto_thresholds)
         self._prep_updating_controls = False
+        self._sync_prep_mask_controls_from_state()
         self._update_prep_status_labels()
         self._render_prep_preview()
 
@@ -1152,8 +1216,40 @@ class MainWindow(QMainWindow):
             auto_thresholds=auto_thresholds,
             manual_thresholds=manual_thresholds,
             show_halftone_preview=self.checkbox_prep_halftone_preview.isChecked(),
+            local_masks=[mask.sanitized() for mask in self.image_prep_state.settings.local_masks],
         )
         return settings.sanitized()
+
+    def _selected_prep_mask(self) -> ImagePrepMask | None:
+        masks = self.image_prep_state.settings.local_masks
+        if 0 <= self._selected_prep_mask_index < len(masks):
+            return masks[self._selected_prep_mask_index].sanitized()
+        return None
+
+    def _sync_prep_mask_controls_from_state(self) -> None:
+        masks = self.image_prep_state.settings.local_masks
+        if not masks:
+            self._selected_prep_mask_index = -1
+        elif not 0 <= self._selected_prep_mask_index < len(masks):
+            self._selected_prep_mask_index = 0
+
+        selected = self._selected_prep_mask()
+        self._prep_mask_controls_syncing = True
+        if selected is None:
+            self.lbl_prep_mask_status.setText("No local mask selected.")
+            self.spin_prep_mask_radius.setValue(20.0)
+            self.spin_prep_mask_feather.setValue(4.0)
+            self.spin_prep_mask_contrast.setValue(0)
+            self.spin_prep_mask_blur.setValue(0.0)
+        else:
+            self.lbl_prep_mask_status.setText(
+                f"Mask {self._selected_prep_mask_index + 1} of {len(masks)}. Drag the circle in the preview."
+            )
+            self.spin_prep_mask_radius.setValue(selected.radius * 100.0)
+            self.spin_prep_mask_feather.setValue(selected.feather * 100.0)
+            self.spin_prep_mask_contrast.setValue(selected.contrast_percent)
+            self.spin_prep_mask_blur.setValue(selected.blur_radius)
+        self._prep_mask_controls_syncing = False
 
     def _set_manual_threshold_controls_visible(self, visible: bool) -> None:
         self.lbl_prep_manual_thresholds.setVisible(visible)
@@ -1222,6 +1318,7 @@ class MainWindow(QMainWindow):
             self._prep_preview_full_pixmap = QPixmap()
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Load a JPG to begin.")
+            self.prep_preview_label.clear_masks()
             return
 
         preview_image = (
@@ -1234,9 +1331,14 @@ class MainWindow(QMainWindow):
             self._prep_preview_full_pixmap = QPixmap()
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Preview unavailable.")
+            self.prep_preview_label.clear_masks()
             return
         self._prep_preview_full_pixmap = pixmap
         self.prep_preview_label.setText("")
+        self.prep_preview_label.set_masks(
+            self.image_prep_state.settings.local_masks,
+            self._selected_prep_mask_index,
+        )
         self._update_prep_preview_fit()
 
     def _recompute_prep_artifacts(self, *, mark_dirty: bool) -> bool:
@@ -1294,6 +1396,7 @@ class MainWindow(QMainWindow):
 
         self.image_prep_state.source_image_path = image_path
         self.image_prep_state.settings = effective_settings
+        self._selected_prep_mask_index = 0 if effective_settings.local_masks else -1
         self.image_prep_state.sidecar_path = sidecar_path or sidecar_path_for_image(image_path)
         self.image_prep_state.export_bmp_path = export_bmp_path or processed_bmp_path_for_image(image_path)
         self.image_prep_state.linked_to_control = False
@@ -1738,6 +1841,77 @@ class MainWindow(QMainWindow):
             return
         self.image_prep_state.settings.show_halftone_preview = checked
         self._render_prep_preview()
+
+    def _on_prep_add_mask(self) -> None:
+        if self.image_prep_state.source_image_path is None:
+            QMessageBox.information(self, "No image", "Open a JPG image before adding a local mask.")
+            return
+        settings = self.image_prep_state.settings.sanitized()
+        settings.local_masks.append(
+            ImagePrepMask(
+                center_x=0.5,
+                center_y=0.5,
+                radius=0.2,
+                feather=0.04,
+                contrast_percent=settings.contrast_percent,
+                blur_radius=settings.blur_radius,
+            ).sanitized()
+        )
+        self.image_prep_state.settings = settings
+        self._selected_prep_mask_index = len(settings.local_masks) - 1
+        self._sync_prep_mask_controls_from_state()
+        self._on_prep_settings_changed()
+
+    def _on_prep_remove_mask(self) -> None:
+        masks = list(self.image_prep_state.settings.local_masks)
+        if not 0 <= self._selected_prep_mask_index < len(masks):
+            return
+        del masks[self._selected_prep_mask_index]
+        self.image_prep_state.settings.local_masks = masks
+        self._selected_prep_mask_index = min(self._selected_prep_mask_index, len(masks) - 1)
+        self._sync_prep_mask_controls_from_state()
+        self._on_prep_settings_changed()
+
+    def _on_prep_mask_selected(self, index: int) -> None:
+        if not 0 <= index < len(self.image_prep_state.settings.local_masks):
+            return
+        self._selected_prep_mask_index = index
+        self._sync_prep_mask_controls_from_state()
+        self.prep_preview_label.set_masks(
+            self.image_prep_state.settings.local_masks,
+            self._selected_prep_mask_index,
+        )
+
+    def _on_prep_mask_moved(self, index: int, center_x: float, center_y: float) -> None:
+        masks = list(self.image_prep_state.settings.local_masks)
+        if not 0 <= index < len(masks):
+            return
+        masks[index] = replace(
+            masks[index],
+            center_x=max(0.0, min(1.0, float(center_x))),
+            center_y=max(0.0, min(1.0, float(center_y))),
+        ).sanitized()
+        self.image_prep_state.settings.local_masks = masks
+        self._selected_prep_mask_index = index
+        self.prep_preview_label.set_masks(masks, index)
+        self._schedule_prep_recompute(delay_ms=160)
+
+    def _on_prep_mask_controls_changed(self, *_args: object) -> None:
+        if self._prep_mask_controls_syncing or self._prep_updating_controls:
+            return
+        masks = list(self.image_prep_state.settings.local_masks)
+        if not 0 <= self._selected_prep_mask_index < len(masks):
+            return
+        masks[self._selected_prep_mask_index] = replace(
+            masks[self._selected_prep_mask_index],
+            radius=float(self.spin_prep_mask_radius.value()) / 100.0,
+            feather=float(self.spin_prep_mask_feather.value()) / 100.0,
+            contrast_percent=int(self.spin_prep_mask_contrast.value()),
+            blur_radius=float(self.spin_prep_mask_blur.value()),
+        ).sanitized()
+        self.image_prep_state.settings.local_masks = masks
+        self.prep_preview_label.set_masks(masks, self._selected_prep_mask_index)
+        self._schedule_prep_recompute(delay_ms=90)
 
     def _active_draw_prep_context(self) -> dict[str, object] | None:
         if not self.image_prep_state.linked_to_control:
@@ -2593,6 +2767,7 @@ class MainWindow(QMainWindow):
         retained_available = self.job_state.retained_image is not None
         prep_has_source = self.image_prep_state.source_image_path is not None
         prep_has_artifacts = self.image_prep_state.artifacts is not None
+        prep_has_selected_mask = self._selected_prep_mask() is not None
         self.current_ui_state = derive_ui_state(
             has_image=has_image,
             is_sliced=is_sliced,
@@ -2626,6 +2801,12 @@ class MainWindow(QMainWindow):
         self.btn_prep_save_outputs.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
         self.btn_prep_reset_defaults.setEnabled(prep_controls_enabled)
+        self.btn_prep_add_mask.setEnabled(prep_has_source and prep_controls_enabled)
+        self.btn_prep_remove_mask.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.spin_prep_mask_radius.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.spin_prep_mask_feather.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.spin_prep_mask_contrast.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.spin_prep_mask_blur.setEnabled(prep_has_selected_mask and prep_controls_enabled)
         self.spin_prep_dpi.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_width_mm.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_height_mm.setEnabled(prep_has_source and prep_controls_enabled)
