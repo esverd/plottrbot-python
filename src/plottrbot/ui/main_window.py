@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -26,7 +27,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSlider,
     QStackedWidget,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -150,23 +150,104 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         root = QWidget(self)
+        root.setObjectName("appRoot")
         layout = QHBoxLayout(root)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         self.setCentralWidget(root)
 
-        self.tab_control = QTabWidget()
-        self.tab_control.setMinimumWidth(470)
-        layout.addWidget(self.tab_control, 0)
+        self.workflow_nav = QWidget()
+        self.workflow_nav.setObjectName("workflowNav")
+        nav_layout = QVBoxLayout(self.workflow_nav)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(6)
 
-        self.image_prep_tab = QWidget()
-        self.control_tab = QWidget()
-        self.advanced_tab = QWidget()
-        self.tab_control.addTab(self.control_tab, "Control")
-        self.tab_control.addTab(self.advanced_tab, "Advanced")
-        self.tab_control.addTab(self.image_prep_tab, "Image Prep")
+        nav_title = QLabel("Plottrbot")
+        nav_title.setObjectName("workflowNavTitle")
+        nav_layout.addWidget(nav_title)
+
+        self.workflow_button_group = QButtonGroup(self)
+        self.workflow_button_group.setExclusive(True)
+        self.workflow_buttons: dict[str, QPushButton] = {}
+        self.workflow_order: tuple[tuple[str, str], ...] = (
+            ("prep", "Prep"),
+            ("place", "Place"),
+            ("connect", "Connect"),
+            ("draw", "Draw"),
+            ("advanced", "Advanced"),
+        )
+        for index, (key, label) in enumerate(self.workflow_order, start=1):
+            button = QPushButton(f"{index}. {label}")
+            button.setCheckable(True)
+            button.setObjectName("workflowNavButton")
+            self.workflow_buttons[key] = button
+            self.workflow_button_group.addButton(button)
+            nav_layout.addWidget(button)
+        nav_layout.addStretch(1)
+        layout.addWidget(self.workflow_nav, 0)
+
+        self.workflow_stack = QStackedWidget()
+        self.workflow_stack.setObjectName("workflowStack")
+        self.workflow_stack.setMinimumWidth(500)
+
+        self.prep_page = QWidget()
+        self.place_page = QWidget()
+        self.connect_page = QWidget()
+        self.draw_page = QWidget()
+        self.advanced_page = QWidget()
+
+        self.image_prep_tab = self.prep_page
+        self.control_tab = self.place_page
+        self.advanced_tab = self.advanced_page
+        self.workflow_pages: dict[str, QWidget] = {
+            "prep": self.prep_page,
+            "place": self.place_page,
+            "connect": self.connect_page,
+            "draw": self.draw_page,
+            "advanced": self.advanced_page,
+        }
 
         self._build_image_prep_tab()
-        self._build_control_tab()
+        self._build_place_page()
+        self._build_connect_page()
+        self._build_draw_page()
         self._build_advanced_tab()
+
+        for key, _label in self.workflow_order:
+            self.workflow_stack.addWidget(self.workflow_pages[key])
+        layout.addWidget(self.workflow_stack, 0)
+
+        self.preview_panel = QWidget()
+        self.preview_panel.setObjectName("previewPanel")
+        preview_panel_layout = QVBoxLayout(self.preview_panel)
+        preview_panel_layout.setContentsMargins(0, 0, 0, 0)
+        preview_panel_layout.setSpacing(6)
+
+        preview_header = QWidget()
+        preview_header.setObjectName("previewHeader")
+        preview_header_layout = QHBoxLayout(preview_header)
+        preview_header_layout.setContentsMargins(10, 8, 10, 8)
+        preview_header_layout.setSpacing(8)
+
+        preview_text = QVBoxLayout()
+        preview_text.setContentsMargins(0, 0, 0, 0)
+        preview_text.setSpacing(2)
+        self.lbl_preview_title = QLabel("Preview")
+        self.lbl_preview_title.setObjectName("previewTitle")
+        self.lbl_preview_status = QLabel("No job image selected.")
+        self.lbl_preview_status.setObjectName("previewStatus")
+        self.lbl_preview_status.setWordWrap(True)
+        preview_text.addWidget(self.lbl_preview_title)
+        preview_text.addWidget(self.lbl_preview_status)
+        preview_header_layout.addLayout(preview_text, 1)
+
+        self.btn_zoom_out = QPushButton("Zoom out")
+        self.btn_zoom_in = QPushButton("Zoom in")
+        self.btn_zoom_out.setToolTip("Zoom machine preview out")
+        self.btn_zoom_in.setToolTip("Zoom machine preview in")
+        preview_header_layout.addWidget(self.btn_zoom_out)
+        preview_header_layout.addWidget(self.btn_zoom_in)
+        preview_panel_layout.addWidget(preview_header, 0)
 
         self.prep_preview_label = QLabel("Load a JPG to begin.")
         self.prep_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -196,11 +277,16 @@ class MainWindow(QMainWindow):
         self.right_preview_stack = QStackedWidget()
         self.right_preview_stack.addWidget(self.prep_preview_panel)
         self.right_preview_stack.addWidget(self.machine_preview_panel)
-        layout.addWidget(self.right_preview_stack, 1)
-        self._sync_right_preview_panel()
+        preview_panel_layout.addWidget(self.right_preview_stack, 1)
+        layout.addWidget(self.preview_panel, 1)
+
+        self._apply_operator_style()
+        self._set_workflow_page("prep")
 
     def _build_image_prep_tab(self) -> None:
         layout = QVBoxLayout(self.image_prep_tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
         source_group = QGroupBox("Image source")
         source_layout = QVBoxLayout(source_group)
@@ -341,8 +427,9 @@ class MainWindow(QMainWindow):
 
         action_row = QHBoxLayout()
         self.btn_prep_save_outputs = QPushButton("Save BMP + sidecar")
-        self.btn_prep_apply_to_control = QPushButton("Apply To Control")
+        self.btn_prep_apply_to_control = QPushButton("Use for job")
         self.btn_prep_reset_defaults = QPushButton("Reset defaults")
+        self.btn_prep_apply_to_control.setProperty("role", "primary")
         action_row.addWidget(self.btn_prep_save_outputs)
         action_row.addWidget(self.btn_prep_apply_to_control)
         action_row.addWidget(self.btn_prep_reset_defaults)
@@ -350,19 +437,19 @@ class MainWindow(QMainWindow):
 
         layout.addStretch(1)
 
-    def _build_control_tab(self) -> None:
-        layout = QVBoxLayout(self.control_tab)
+    def _build_place_page(self) -> None:
+        layout = QVBoxLayout(self.place_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
-        image_group = QGroupBox("Image options")
+        image_group = QGroupBox("Job image")
         image_layout = QVBoxLayout(image_group)
         self.btn_select_img = QPushButton("Select image")
         self.btn_move_img = QPushButton("Set position")
         self.btn_center_img = QPushButton("Move top left")
         self.btn_clear_img = QPushButton("Clear")
-        self.btn_zoom_out = QPushButton("Zoom out")
-        self.btn_zoom_in = QPushButton("Zoom in")
         self.btn_slice_img = QPushButton("Slice image")
-        self.btn_hold_img = QPushButton("Hold image")
+        self.btn_slice_img.setProperty("role", "primary")
 
         move_grid = QGridLayout()
         self.txt_move_x = QLineEdit("0")
@@ -374,29 +461,71 @@ class MainWindow(QMainWindow):
         move_grid.addWidget(self.txt_move_y, 1, 1)
         move_grid.addWidget(self.btn_center_img, 1, 2)
 
-        zoom_row = QHBoxLayout()
-        zoom_row.addWidget(self.btn_zoom_out)
-        zoom_row.addWidget(self.btn_zoom_in)
+        dpi_row = QHBoxLayout()
+        dpi_row.addWidget(QLabel("Current DPI"))
+        self.txt_dpi = QLineEdit()
+        self.txt_dpi.setMaximumWidth(100)
+        self.btn_update_dpi = QPushButton("Update DPI")
+        dpi_row.addWidget(self.txt_dpi)
+        dpi_row.addWidget(self.btn_update_dpi)
+        dpi_row.addStretch(1)
 
         image_layout.addWidget(self.btn_select_img)
         image_layout.addLayout(move_grid)
+        image_layout.addLayout(dpi_row)
         image_layout.addWidget(self.btn_clear_img)
-        image_layout.addLayout(zoom_row)
         image_layout.addWidget(self.btn_slice_img)
-        image_layout.addWidget(self.btn_hold_img)
         layout.addWidget(image_group)
+        layout.addStretch(1)
 
-        robot_group = QGroupBox("Robot control")
+    def _build_connect_page(self) -> None:
+        layout = QVBoxLayout(self.connect_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        robot_group = QGroupBox("USB connection")
         robot_layout = QVBoxLayout(robot_group)
         port_row = QHBoxLayout()
         self.combo_port = QComboBox()
         self.btn_refresh_ports = QPushButton("Refresh")
         self.btn_connect = QPushButton("Connect USB")
+        self.btn_connect.setProperty("role", "primary")
         port_row.addWidget(self.combo_port, 1)
         port_row.addWidget(self.btn_refresh_ports)
         port_row.addWidget(self.btn_connect)
+        robot_layout.addLayout(port_row)
 
+        motor_row = QHBoxLayout()
+        self.btn_enable_stepper = QPushButton("Enable motors")
+        self.btn_disable_stepper = QPushButton("Disable motors")
+        motor_row.addWidget(self.btn_enable_stepper)
+        motor_row.addWidget(self.btn_disable_stepper)
+        robot_layout.addLayout(motor_row)
+
+        pen_row = QHBoxLayout()
+        self.btn_pen_touch = QPushButton("Set tool to canvas")
+        self.btn_pen_away = QPushButton("Set away from canvas")
+        pen_row.addWidget(self.btn_pen_touch)
+        pen_row.addWidget(self.btn_pen_away)
+        robot_layout.addLayout(pen_row)
+
+        self.btn_home = QPushButton("Move to home position")
+        robot_layout.addWidget(self.btn_home)
+        layout.addWidget(robot_group)
+        layout.addStretch(1)
+
+    def _build_draw_page(self) -> None:
+        layout = QVBoxLayout(self.draw_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        robot_group = QGroupBox("Draw controls")
+        robot_layout = QVBoxLayout(robot_group)
         self.btn_bounding_box = QPushButton("Move in bounding box formation")
+        self.checkbox_bounding_pen = QCheckBox("Use pen when indicating bounding box")
+        self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
+        self.checkbox_stop_recovery.setChecked(True)
+
         self.bbox_point_buttons: dict[str, QPushButton] = {}
         self.bbox_points_panel = QWidget()
         bbox_points_panel_layout = QVBoxLayout(self.bbox_points_panel)
@@ -447,52 +576,11 @@ class MainWindow(QMainWindow):
             }
             """
         )
-        self.btn_pause_drawing = QPushButton("Pause drawing")
-        self.btn_stop_drawing = QPushButton("Stop drawing")
-        self.btn_send_img = QPushButton("Send image to robot")
-        robot_layout.addLayout(port_row)
-        robot_layout.addWidget(self.btn_bounding_box)
-        robot_layout.addWidget(self.bbox_points_panel)
-        robot_layout.addWidget(self.btn_pause_drawing)
-        robot_layout.addWidget(self.btn_stop_drawing)
-        robot_layout.addWidget(self.btn_send_img)
-        layout.addWidget(robot_group)
-        layout.addStretch(1)
-
-    def _build_advanced_tab(self) -> None:
-        layout = QVBoxLayout(self.advanced_tab)
-
-        self.txt_out = QPlainTextEdit()
-        self.txt_out.setReadOnly(True)
-        self.txt_out.setPlaceholderText("Status messages")
-        layout.addWidget(self.txt_out)
-
-        serial_row = QHBoxLayout()
-        self.txt_serial_cmd = QLineEdit()
-        self.btn_send_cmd = QPushButton("Send serial msg")
-        serial_row.addWidget(self.txt_serial_cmd, 1)
-        serial_row.addWidget(self.btn_send_cmd)
-        layout.addLayout(serial_row)
-
-        self.checkbox_bounding_pen = QCheckBox("Use pen when indicating bounding box")
-        layout.addWidget(self.checkbox_bounding_pen)
-        self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
-        self.checkbox_stop_recovery.setChecked(True)
-        layout.addWidget(self.checkbox_stop_recovery)
-        self.checkbox_motor_power_commands = QCheckBox("Enable motor power commands (M17/M18)")
-        layout.addWidget(self.checkbox_motor_power_commands)
-
-        layout.addWidget(QLabel("End GCODE"))
-        self.txt_end_gcode = QPlainTextEdit()
-        self.txt_end_gcode.setFixedHeight(90)
-        layout.addWidget(self.txt_end_gcode)
-
         cmd_row = QHBoxLayout()
         self.txt_cmd_start = QLineEdit("0")
         self.btn_cmd_start = QPushButton("Start from line number")
         cmd_row.addWidget(self.txt_cmd_start)
         cmd_row.addWidget(self.btn_cmd_start)
-        layout.addLayout(cmd_row)
 
         slider_row = QHBoxLayout()
         self.slider_cmd_count = QSlider(Qt.Orientation.Horizontal)
@@ -503,49 +591,168 @@ class MainWindow(QMainWindow):
         slider_row.addWidget(self.slider_cmd_count, 1)
         slider_row.addWidget(self.btn_slider_dec)
         slider_row.addWidget(self.btn_slider_inc)
-        layout.addLayout(slider_row)
 
-        motor_row = QHBoxLayout()
-        self.btn_enable_stepper = QPushButton("Enable motors")
-        self.btn_disable_stepper = QPushButton("Disable motors")
-        motor_row.addWidget(self.btn_enable_stepper)
-        motor_row.addWidget(self.btn_disable_stepper)
-        layout.addLayout(motor_row)
+        self.btn_pause_drawing = QPushButton("Pause drawing")
+        self.btn_stop_drawing = QPushButton("Stop drawing")
+        self.btn_send_img = QPushButton("Send image to robot")
+        self.btn_send_img.setProperty("role", "primary")
+        self.btn_stop_drawing.setProperty("role", "danger")
+        robot_layout.addWidget(self.btn_bounding_box)
+        robot_layout.addWidget(self.checkbox_bounding_pen)
+        robot_layout.addWidget(self.bbox_points_panel)
+        robot_layout.addWidget(self.checkbox_stop_recovery)
+        robot_layout.addLayout(cmd_row)
+        robot_layout.addLayout(slider_row)
+        robot_layout.addWidget(self.btn_send_img)
+        robot_layout.addWidget(self.btn_pause_drawing)
+        robot_layout.addWidget(self.btn_stop_drawing)
+        layout.addWidget(robot_group)
+        layout.addStretch(1)
 
-        pen_row = QHBoxLayout()
-        self.btn_pen_touch = QPushButton("Set tool to canvas")
-        self.btn_pen_away = QPushButton("Set away from canvas")
-        pen_row.addWidget(self.btn_pen_touch)
-        pen_row.addWidget(self.btn_pen_away)
-        layout.addLayout(pen_row)
+    def _build_advanced_tab(self) -> None:
+        layout = QVBoxLayout(self.advanced_tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
-        self.btn_home = QPushButton("Move to home position")
-        layout.addWidget(self.btn_home)
+        overlay_group = QGroupBox("Image overlay")
+        overlay_layout = QVBoxLayout(overlay_group)
+        self.btn_hold_img = QPushButton("Hold image")
+        overlay_layout.addWidget(self.btn_hold_img)
+        layout.addWidget(overlay_group)
 
-        dpi_row = QHBoxLayout()
-        dpi_row.addWidget(QLabel("Current DPI"))
-        self.txt_dpi = QLineEdit()
-        self.txt_dpi.setMaximumWidth(100)
-        self.btn_update_dpi = QPushButton("Update DPI")
-        dpi_row.addWidget(self.txt_dpi)
-        dpi_row.addWidget(self.btn_update_dpi)
-        dpi_row.addStretch(1)
-        layout.addLayout(dpi_row)
+        serial_group = QGroupBox("Raw serial")
+        serial_layout = QVBoxLayout(serial_group)
+        serial_row = QHBoxLayout()
+        self.txt_serial_cmd = QLineEdit()
+        self.btn_send_cmd = QPushButton("Send serial msg")
+        serial_row.addWidget(self.txt_serial_cmd, 1)
+        serial_row.addWidget(self.btn_send_cmd)
+        serial_layout.addLayout(serial_row)
+        layout.addWidget(serial_group)
+
+        settings_group = QGroupBox("Machine settings")
+        settings_layout = QVBoxLayout(settings_group)
+        self.checkbox_motor_power_commands = QCheckBox("Enable motor power commands (M17/M18)")
+        settings_layout.addWidget(self.checkbox_motor_power_commands)
+        settings_layout.addWidget(QLabel("End GCODE"))
+        self.txt_end_gcode = QPlainTextEdit()
+        self.txt_end_gcode.setFixedHeight(90)
+        settings_layout.addWidget(self.txt_end_gcode)
 
         dims_grid = QGridLayout()
         self.txt_robot_width = QLineEdit()
         self.txt_robot_height = QLineEdit()
-        self.btn_save_dims = QPushButton("Save dimensions")
+        self.btn_save_dims = QPushButton("Save machine settings")
         dims_grid.addWidget(QLabel("Robot width [mm]"), 0, 0)
         dims_grid.addWidget(self.txt_robot_width, 0, 1)
         dims_grid.addWidget(QLabel("Robot height [mm]"), 1, 0)
         dims_grid.addWidget(self.txt_robot_height, 1, 1)
         dims_grid.addWidget(self.btn_save_dims, 2, 0, 1, 2)
-        layout.addLayout(dims_grid)
+        settings_layout.addLayout(dims_grid)
+        layout.addWidget(settings_group)
+
+        log_group = QGroupBox("Status log")
+        log_layout = QVBoxLayout(log_group)
+        self.txt_out = QPlainTextEdit()
+        self.txt_out.setReadOnly(True)
+        self.txt_out.setPlaceholderText("Status messages")
+        log_layout.addWidget(self.txt_out)
+        layout.addWidget(log_group, 1)
         layout.addStretch(1)
 
+    def _apply_operator_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QWidget#appRoot {
+                background: #f6f8fa;
+            }
+            QWidget#workflowNav {
+                background: #ffffff;
+                border: 1px solid #d8dee6;
+                border-radius: 6px;
+                min-width: 118px;
+                max-width: 118px;
+            }
+            QLabel#workflowNavTitle {
+                color: #1f2933;
+                font-weight: 600;
+                padding: 10px 8px 6px 8px;
+            }
+            QPushButton#workflowNavButton {
+                border: 0;
+                border-radius: 5px;
+                color: #2f3a45;
+                padding: 8px 10px;
+                text-align: left;
+            }
+            QPushButton#workflowNavButton:hover {
+                background: #eef3f8;
+            }
+            QPushButton#workflowNavButton:checked {
+                background: #dcebf7;
+                color: #0f4f79;
+                font-weight: 600;
+            }
+            QStackedWidget#workflowStack {
+                background: transparent;
+            }
+            QWidget#previewPanel {
+                background: #ffffff;
+                border: 1px solid #d8dee6;
+                border-radius: 6px;
+            }
+            QWidget#previewHeader {
+                background: #f9fbfd;
+                border-bottom: 1px solid #d8dee6;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+            }
+            QLabel#previewTitle {
+                color: #1f2933;
+                font-weight: 600;
+            }
+            QLabel#previewStatus {
+                color: #52606d;
+                font-size: 11px;
+            }
+            QPushButton[role="primary"] {
+                background: #0f6da8;
+                color: #ffffff;
+                border: 1px solid #0c5d8f;
+                border-radius: 5px;
+                padding: 5px 10px;
+            }
+            QPushButton[role="primary"]:disabled {
+                background: #edf1f5;
+                color: #8d99a6;
+                border-color: #d5dce4;
+            }
+            QPushButton[role="danger"] {
+                color: #9b1c1c;
+                border-color: #d7a7a7;
+            }
+            QGroupBox {
+                border: 1px solid #cfd7df;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: #2f3a45;
+                font-weight: 600;
+            }
+            """
+        )
+
     def _connect_signals(self) -> None:
-        self.tab_control.currentChanged.connect(self._on_tab_changed)
+        for key, button in self.workflow_buttons.items():
+            button.clicked.connect(lambda _checked=False, page_key=key: self._set_workflow_page(page_key))
+        self.workflow_stack.currentChanged.connect(self._on_workflow_stack_changed)
+
         self.btn_prep_load_jpg.clicked.connect(self._on_prep_load_jpg)
         self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
         self.btn_prep_save_outputs.clicked.connect(self._on_prep_save_outputs)
@@ -736,16 +943,79 @@ class MainWindow(QMainWindow):
                 return bmp_candidate, sidecar_candidate
         raise RuntimeError("Could not find an available filename for image prep save output.")
 
-    def _sync_right_preview_panel(self) -> None:
-        is_prep_tab = self.tab_control.currentWidget() is self.image_prep_tab
-        self.right_preview_stack.setCurrentWidget(
-            self.prep_preview_panel if is_prep_tab else self.machine_preview_panel
-        )
-        if is_prep_tab:
-            self._update_prep_preview_fit()
+    def _current_workflow_key(self) -> str:
+        current_page = self.workflow_stack.currentWidget()
+        for key, page in self.workflow_pages.items():
+            if current_page is page:
+                return key
+        return "prep"
 
-    def _on_tab_changed(self, _index: int) -> None:
-        self._sync_right_preview_panel()
+    def _set_workflow_page(self, key: str) -> None:
+        page = self.workflow_pages.get(key)
+        if page is None:
+            return
+        self.workflow_stack.setCurrentWidget(page)
+        self.workflow_buttons[key].setChecked(True)
+        self._sync_preview_panel()
+
+    def _on_workflow_stack_changed(self, _index: int) -> None:
+        key = self._current_workflow_key()
+        if key in self.workflow_buttons:
+            self.workflow_buttons[key].setChecked(True)
+        self._sync_preview_panel()
+
+    def _sync_preview_panel(self) -> None:
+        is_prep_page = self._current_workflow_key() == "prep"
+        self.right_preview_stack.setCurrentWidget(
+            self.prep_preview_panel if is_prep_page else self.machine_preview_panel
+        )
+        self.btn_zoom_out.setEnabled(not is_prep_page)
+        self.btn_zoom_in.setEnabled(not is_prep_page)
+        if is_prep_page:
+            self._update_prep_preview_fit()
+        self._update_preview_header()
+
+    def _update_preview_header(self) -> None:
+        key = self._current_workflow_key()
+        if key == "prep":
+            self.lbl_preview_title.setText("Image prep preview")
+            source = self.image_prep_state.source_image_path
+            artifacts = self.image_prep_state.artifacts
+            if source is None:
+                self.lbl_preview_status.setText("Load a JPG or sidecar to preview prep output.")
+            elif artifacts is None:
+                self.lbl_preview_status.setText(f"{source.name} is loaded. Preview is not available yet.")
+            else:
+                self.lbl_preview_status.setText(
+                    f"{source.name} | "
+                    f"{artifacts.image_width_mm:.1f}x{artifacts.image_height_mm:.1f} mm | "
+                    f"{artifacts.image_width_px}x{artifacts.image_height_px} px"
+                )
+            return
+
+        title_by_key = {
+            "place": "Placement preview",
+            "connect": "Machine preview",
+            "draw": "Draw preview",
+            "advanced": "Machine preview",
+        }
+        self.lbl_preview_title.setText(title_by_key.get(key, "Preview"))
+        profile = self.settings.machine_profile
+        if self.job_state.loaded_file is None:
+            self.lbl_preview_status.setText(
+                f"Canvas {profile.canvas_width_mm}x{profile.canvas_height_mm} mm. No job image selected."
+            )
+            return
+        image_status = (
+            f"{self.job_state.loaded_file.name} | "
+            f"X{self.job_state.img_move_x_mm} Y{self.job_state.img_move_y_mm} mm | "
+            f"{self.job_state.image_width_mm:.1f}x{self.job_state.image_height_mm:.1f} mm"
+        )
+        if self.job_state.lines:
+            image_status += f" | {len(self.job_state.lines)} lines, {len(self.job_state.gcode)} commands"
+        if self._stream_is_active():
+            image_status += f" | sending command {self.job_state.current_send_index}"
+        self.lbl_preview_status.setText(image_status)
 
     def _update_prep_preview_fit(self) -> None:
         if self._prep_preview_full_pixmap.isNull():
@@ -1195,8 +1465,8 @@ class MainWindow(QMainWindow):
             dpi_override=self.image_prep_state.settings.dpi,
             linked_from_prep=True,
         )
-        self.tab_control.setCurrentWidget(self.control_tab)
-        self._append_log("Applied processed image to Control tab.")
+        self._set_workflow_page("place")
+        self._append_log("Applied processed image to job.")
 
     def _on_prep_dimension_changed(self, *_args: object) -> None:
         if self._prep_updating_controls:
@@ -2050,7 +2320,7 @@ class MainWindow(QMainWindow):
             self.settings.end_gcode_lines = default_end_gcode_lines(profile)
             self.txt_end_gcode.setPlainText("\n".join(self.settings.end_gcode_lines) + "\n")
         self.settings_store.save(self.settings)
-        QMessageBox.information(self, "Saved", "Dimensions saved.")
+        QMessageBox.information(self, "Saved", "Machine settings saved.")
 
     def _on_stream_state(self, state_obj: object) -> None:
         if not isinstance(state_obj, SendSessionState):
@@ -2214,6 +2484,7 @@ class MainWindow(QMainWindow):
         self.btn_pause_drawing.setEnabled(can_draw and stream_active)
         self.btn_stop_drawing.setEnabled(can_draw and stream_active)
         self.btn_cmd_start.setEnabled(can_draw and not stream_active and not self._manual_busy)
+        self._sync_preview_panel()
 
     def _sync_sleep_inhibitor(self) -> None:
         if self.transport.is_connected and self.streamer.state.status == SendStatus.RUNNING:

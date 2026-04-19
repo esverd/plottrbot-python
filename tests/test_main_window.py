@@ -982,7 +982,7 @@ def test_image_prep_dpi_change_updates_render_resolution_with_fixed_dimensions(
     assert high_width_px > low_width_px
 
 
-def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
+def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
     qtbot, settings_store, tmp_path: Path
 ) -> None:
     window = MainWindow(
@@ -993,13 +993,22 @@ def test_right_preview_switches_with_tab_and_bmp_save_shows_toast(
     )
     qtbot.addWidget(window)
 
-    assert window.tab_control.tabText(0) == "Control"
-    assert window.tab_control.tabText(1) == "Advanced"
-    assert window.tab_control.tabText(2) == "Image Prep"
+    assert tuple(label for _key, label in window.workflow_order) == (
+        "Prep",
+        "Place",
+        "Connect",
+        "Draw",
+        "Advanced",
+    )
+    assert window.workflow_stack.currentWidget() is window.prep_page
+    assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
+    assert window.workflow_buttons["prep"].isChecked() is True
+
+    window._set_workflow_page("place")
     assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
-    window.tab_control.setCurrentWidget(window.control_tab)
-    assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
-    window.tab_control.setCurrentWidget(window.image_prep_tab)
+    assert window.workflow_buttons["place"].isChecked() is True
+
+    window._set_workflow_page("prep")
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
 
     jpg_path = tmp_path / "toast.jpg"

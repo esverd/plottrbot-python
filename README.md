@@ -24,7 +24,7 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
 
 ## Image Prep Workflow
 
-- Use the `Image Prep` tab to load a JPG/JPEG and adjust:
+- Use the `Prep` workflow to load a JPG/JPEG and adjust:
   - DPI
   - target width/height in mm
   - Gaussian blur
@@ -32,12 +32,11 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
 - Preview can toggle between tonal and halftone views.
-- `Save BMP` writes a deterministic file next to the source JPG:
+- `Save BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
-- `Save sidecar` writes editable prep metadata next to the source JPG:
   - `<image-stem>.plottrbot-edit.json`
-- `Apply To Control` loads the generated BMP into the existing Control tab flow.
-- If prep-linked settings are changed after apply, slicing from Control auto-refreshes the processed BMP first.
+- `Use for job` loads the generated BMP into the Place workflow.
+- If prep-linked settings are changed after using the image for a job, slicing from Place auto-refreshes the processed BMP first.
 
 ## Streaming safety behaviors
 
@@ -52,7 +51,7 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
 Every draw start creates a JSON session log with:
 
 - image file/path, placement, size, and DPI
-- optional image-prep metadata (source JPG + prep settings) when the draw came from `Image Prep`
+- optional image-prep metadata (source JPG + prep settings) when the draw came from `Prep`
 - machine profile and USB port
 - start command/line index and total command/line counts
 - full generated G-code payload

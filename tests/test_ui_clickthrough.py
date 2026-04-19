@@ -167,9 +167,15 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     monkeypatch.setattr(QMessageBox, "information", _info)
     monkeypatch.setattr(QMessageBox, "warning", _warning)
 
+    assert window.workflow_buttons["prep"].isChecked() is True
+
+    qtbot.mouseClick(window.workflow_buttons["connect"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.connect_page
     qtbot.mouseClick(window.btn_refresh_ports, Qt.MouseButton.LeftButton)
     assert window.combo_port.count() == 1
 
+    qtbot.mouseClick(window.workflow_buttons["place"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.place_page
     qtbot.mouseClick(window.btn_select_img, Qt.MouseButton.LeftButton)
     assert window.job_state.loaded_file == bmp_path
     assert window.job_state.file_type == "bmp"
@@ -206,16 +212,21 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     qtbot.mouseClick(window.btn_zoom_out, Qt.MouseButton.LeftButton)
     assert window.preview_canvas.scale < initial_scale * 1.05
 
+    qtbot.mouseClick(window.workflow_buttons["advanced"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.advanced_page
     qtbot.mouseClick(window.btn_hold_img, Qt.MouseButton.LeftButton)
     assert window.job_state.retained_image is not None
     qtbot.mouseClick(window.btn_hold_img, Qt.MouseButton.LeftButton)
     assert window.job_state.retained_image is None
 
+    qtbot.mouseClick(window.workflow_buttons["place"], Qt.MouseButton.LeftButton)
     qtbot.mouseClick(window.btn_slice_img, Qt.MouseButton.LeftButton)
     assert len(window.job_state.lines) > 1
     assert len(window.job_state.gcode) > 1
     assert window.slider_cmd_count.maximum() == len(window.job_state.lines) - 1
 
+    qtbot.mouseClick(window.workflow_buttons["draw"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.draw_page
     qtbot.mouseClick(window.btn_slider_inc, Qt.MouseButton.LeftButton)
     assert window.slider_cmd_count.value() == 1
     assert window.preview_canvas.selected_line_index == 1
@@ -227,15 +238,18 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     qtbot.keyClick(window.txt_cmd_start, Qt.Key.Key_Return)
     assert window.slider_cmd_count.value() == 1
 
+    qtbot.mouseClick(window.workflow_buttons["connect"], Qt.MouseButton.LeftButton)
     window.combo_port.setCurrentIndex(0)
     qtbot.mouseClick(window.btn_connect, Qt.MouseButton.LeftButton)
     assert transport.connected is True
 
+    qtbot.mouseClick(window.workflow_buttons["advanced"], Qt.MouseButton.LeftButton)
     window.txt_serial_cmd.setText("G92 H")
     qtbot.mouseClick(window.btn_send_cmd, Qt.MouseButton.LeftButton)
     _wait_manual_idle(qtbot, window)
     assert "G92 H" in transport.sent
 
+    qtbot.mouseClick(window.workflow_buttons["connect"], Qt.MouseButton.LeftButton)
     qtbot.mouseClick(window.btn_enable_stepper, Qt.MouseButton.LeftButton)
     _wait_manual_idle(qtbot, window)
     qtbot.mouseClick(window.btn_disable_stepper, Qt.MouseButton.LeftButton)
@@ -248,6 +262,7 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     _wait_manual_idle(qtbot, window)
     assert {"M17", "M18", "G1 Z0", "G1 Z1", "G28"}.issubset(set(transport.sent))
 
+    qtbot.mouseClick(window.workflow_buttons["draw"], Qt.MouseButton.LeftButton)
     window.checkbox_bounding_pen.setChecked(False)
     sent_before_bbox = len(transport.sent)
     qtbot.mouseClick(window.btn_bounding_box, Qt.MouseButton.LeftButton)
@@ -320,12 +335,13 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     )
     window._on_stream_state(streamer.state)
 
+    qtbot.mouseClick(window.workflow_buttons["advanced"], Qt.MouseButton.LeftButton)
     window.txt_robot_width.setText("1200")
     window.txt_robot_height.setText("900")
     qtbot.mouseClick(window.btn_save_dims, Qt.MouseButton.LeftButton)
     assert window.settings.machine_profile.canvas_width_mm == 1200
     assert window.settings.machine_profile.canvas_height_mm == 900
-    assert any("Dimensions saved." in msg for msg in infos)
+    assert any("Machine settings saved." in msg for msg in infos)
 
     qtbot.mouseClick(window.btn_connect, Qt.MouseButton.LeftButton)
     assert transport.connected is False
