@@ -102,7 +102,7 @@ class FakeStreamer:
             total_commands=self._state.total_commands,
         )
 
-    def reset(self) -> None:
+    def reset(self, *, emit_stopped: bool = True) -> None:
         self._state = SendSessionState(
             status=SendStatus.IDLE,
             start_index=0,
@@ -186,7 +186,7 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
     assert window.btn_send_img.isEnabled() is False
     assert window.btn_bounding_box.isEnabled() is False
     assert window.lbl_bbox_hint.text() == "Connect USB in Run to trace the footprint on the canvas."
-    assert window.lbl_resume_line.text().startswith("Line 0 / ")
+    assert window.lbl_resume_line.text().startswith("Selected line 0 / ")
     assert window.lbl_run_state.text() == "Ready to connect"
 
     transport.connected = True
@@ -264,9 +264,52 @@ def test_pause_resume_keeps_send_index(qtbot, settings_store, tmp_path: Path) ->
         current_index=4,
         total_commands=10,
     )
+    window.slider_cmd_count.setValue(1)
     window._on_pause_resume()
     assert window.job_state.current_send_index == 4
     assert window.btn_pause_drawing.text() == "Pause drawing"
+
+
+def test_paused_stream_can_restart_from_selected_line(qtbot, settings_store, tmp_path: Path) -> None:
+    transport = FakeTransport()
+    transport.connected = True
+    streamer = FakeStreamer()
+    inhibitor = FakeSleepInhibitor()
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=transport,
+        streamer=streamer,
+        sleep_inhibitor=inhibitor,
+    )
+    qtbot.addWidget(window)
+
+    bmp_path = tmp_path / "img.bmp"
+    _create_simple_bmp(bmp_path)
+    window._load_bmp(bmp_path)
+    window._on_slice_image()
+    window._on_send_image()
+
+    paused_state = SendSessionState(
+        status=SendStatus.PAUSED,
+        start_index=0,
+        current_index=window.job_state.line_to_command_index[1],
+        total_commands=len(window.job_state.gcode),
+    )
+    streamer._state = paused_state
+    window._on_stream_state(paused_state)
+    window.slider_cmd_count.setValue(2)
+    window._update_ui_state()
+
+    assert window.btn_cmd_start.isEnabled() is True
+    send_calls_before = len(streamer.send_calls)
+    expected_start_index = window.job_state.line_to_command_index[2]
+
+    qtbot.mouseClick(window.btn_cmd_start, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: len(streamer.send_calls) == send_calls_before + 1, timeout=1000)
+
+    _, restart_index = streamer.send_calls[-1]
+    assert restart_index == expected_start_index
+    assert window.job_state.current_send_index == expected_start_index
 
 
 def test_manual_command_async_does_not_block_ui(qtbot, settings_store) -> None:

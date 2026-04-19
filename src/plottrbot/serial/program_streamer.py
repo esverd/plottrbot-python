@@ -49,6 +49,7 @@ class ProgramStreamer:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
+        self._suppress_stopped_state = False
         self._state_lock = threading.Lock()
         self._state = SendSessionState(
             status=SendStatus.IDLE,
@@ -118,13 +119,15 @@ class ProgramStreamer:
     def stop(self) -> None:
         self._stop_event.set()
 
-    def reset(self) -> None:
+    def reset(self, *, emit_stopped: bool = True) -> None:
+        self._suppress_stopped_state = not emit_stopped
         self.stop()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
         self._commands = []
         self._pause_event.clear()
+        self._suppress_stopped_state = False
         self._set_state(
             SendSessionState(
                 status=SendStatus.IDLE,
@@ -146,14 +149,16 @@ class ProgramStreamer:
 
         while next_index < total:
             if self._stop_event.is_set():
-                self._set_state(
-                    SendSessionState(
-                        status=SendStatus.STOPPED,
-                        start_index=start_index,
-                        current_index=next_index,
-                        total_commands=total,
-                    )
+                stopped_state = SendSessionState(
+                    status=SendStatus.STOPPED,
+                    start_index=start_index,
+                    current_index=next_index,
+                    total_commands=total,
                 )
+                if self._suppress_stopped_state:
+                    self._set_state_silent(stopped_state)
+                else:
+                    self._set_state(stopped_state)
                 self._emit_log("Queue stopped")
                 return
 
@@ -209,10 +214,13 @@ class ProgramStreamer:
         self._emit_log("Queue completed")
 
     def _set_state(self, state: SendSessionState) -> None:
-        with self._state_lock:
-            self._state = state
+        self._set_state_silent(state)
         if self._on_state is not None:
             self._on_state(state)
+
+    def _set_state_silent(self, state: SendSessionState) -> None:
+        with self._state_lock:
+            self._state = state
 
     def _emit_log(self, message: str) -> None:
         if self._on_log is not None:

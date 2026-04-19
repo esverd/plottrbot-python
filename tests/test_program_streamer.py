@@ -65,3 +65,20 @@ def test_send_stops_on_error() -> None:
     assert _wait_until(lambda: streamer.state.status == SendStatus.ERROR)
     assert streamer.state.current_index == 1
     assert streamer.state.last_error == "failed"
+
+
+def test_reset_can_suppress_stopped_state_callback_for_restart() -> None:
+    states = []
+    transport = FakeTransport(delay=0.03)
+    streamer = ProgramStreamer(transport, on_state=states.append)
+    streamer.send(["A", "B", "C", "D"])
+
+    assert _wait_until(lambda: len(transport.sent) >= 1)
+    streamer.pause()
+    assert _wait_until(lambda: streamer.state.status == SendStatus.PAUSED)
+    states.clear()
+
+    streamer.reset(emit_stopped=False)
+
+    assert streamer.state.status == SendStatus.IDLE
+    assert SendStatus.STOPPED not in [state.status for state in states]

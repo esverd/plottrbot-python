@@ -94,7 +94,7 @@ class FakeStreamer:
             total_commands=self._state.total_commands,
         )
 
-    def reset(self) -> None:
+    def reset(self, *, emit_stopped: bool = True) -> None:
         self._state = SendSessionState(
             status=SendStatus.IDLE,
             start_index=0,

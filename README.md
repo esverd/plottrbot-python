@@ -50,7 +50,7 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 
 ## Image Prep Workflow
 
-- Use the `Prep` workflow to load a JPG/JPEG and adjust:
+- Use the `Prep` workflow to open a JPG/JPEG or an existing sidecar and adjust:
   - DPI
   - target width/height in mm
   - Gaussian blur
@@ -58,7 +58,7 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
 - Preview can toggle between tonal and halftone views.
-- `Save BMP + sidecar` writes deterministic files next to the source JPG:
+- `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
   - `<image-stem>.plottrbot-edit.json`
 - `Use in Place` loads the generated BMP into the Place Job workflow.
@@ -76,6 +76,7 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 - USB connect runs a preflight (`G92 H`) and requires a valid `GO` acknowledgement.
 - Manual serial actions run asynchronously to avoid UI freezing on slow serial responses.
 - Streaming includes `Pause` and `Stop`; optional stop recovery sends `G1 Z1` then `G28`.
+- While paused, `Continue drawing` resumes the same stream position; `Draw from selected line` restarts from the selected preview line.
 - While a stream is paused, manual controls remain available (`M17`, `M18`, tool up/down, home, raw serial).
 - Out-of-bounds generated paths are blocked before streaming.
 

@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self._prep_recompute_timer.setSingleShot(True)
         self._prep_recompute_timer.setInterval(80)
         self._prep_recompute_timer.timeout.connect(self._on_prep_settings_changed)
+        self._pending_line_restart: tuple[int, int] | None = None
 
         self.converter = converter or BmpConverter(self.settings.machine_profile)
         self.bridge = UiBridge()
@@ -301,11 +302,11 @@ class MainWindow(QMainWindow):
         source_layout = QVBoxLayout(source_group)
 
         source_buttons = QHBoxLayout()
-        self.btn_prep_load_jpg = QPushButton("Load JPG")
+        self.btn_prep_load_jpg = QPushButton("Open JPG/sidecar")
         self.btn_prep_load_sidecar = QPushButton("Load sidecar")
+        self.btn_prep_load_sidecar.hide()
         self.btn_prep_skip_to_place = QPushButton("Place BMP/job")
         source_buttons.addWidget(self.btn_prep_load_jpg)
-        source_buttons.addWidget(self.btn_prep_load_sidecar)
         source_buttons.addWidget(self.btn_prep_skip_to_place)
         source_layout.addLayout(source_buttons)
 
@@ -444,7 +445,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(controls_group)
 
         action_row = QHBoxLayout()
-        self.btn_prep_save_outputs = QPushButton("Save BMP + sidecar")
+        self.btn_prep_save_outputs = QPushButton("Export BMP + sidecar")
         self.btn_prep_apply_to_control = QPushButton("Use in Place")
         self.btn_prep_reset_defaults = QPushButton("Reset defaults")
         self.btn_prep_apply_to_control.setProperty("role", "primary")
@@ -605,8 +606,8 @@ class MainWindow(QMainWindow):
 
         cmd_row = QHBoxLayout()
         self.txt_cmd_start = QLineEdit("0")
-        self.btn_cmd_start = QPushButton("Resume from drawn line")
-        self.lbl_resume_line = QLabel("Line 0 / 0")
+        self.btn_cmd_start = QPushButton("Draw from selected line")
+        self.lbl_resume_line = QLabel("Selected line 0 / 0")
         self.lbl_resume_line.setObjectName("secondaryInfo")
         cmd_row.addWidget(self.txt_cmd_start)
         cmd_row.addWidget(self.btn_cmd_start)
@@ -811,7 +812,7 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda _checked=False, page_key=key: self._set_workflow_page(page_key))
         self.workflow_stack.currentChanged.connect(self._on_workflow_stack_changed)
 
-        self.btn_prep_load_jpg.clicked.connect(self._on_prep_load_jpg)
+        self.btn_prep_load_jpg.clicked.connect(self._on_prep_open_source)
         self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
         self.btn_prep_skip_to_place.clicked.connect(lambda: self._set_workflow_page("place"))
         self.btn_prep_save_outputs.clicked.connect(self._on_prep_save_outputs)
@@ -1444,6 +1445,36 @@ class MainWindow(QMainWindow):
             self._append_log(f"Loaded image prep source: {image_path.name}")
         self._update_ui_state()
 
+    def _on_prep_open_source(self) -> None:
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open image prep source",
+            self._dialog_start_dir(),
+            "JPG or sidecar (*.jpg *.jpeg *.plottrbot-edit.json *.json);;"
+            "JPEG files (*.jpg *.jpeg);;"
+            "Warhol Slicer sidecar (*.plottrbot-edit.json);;"
+            "JSON files (*.json);;"
+            "All files (*.*)",
+        )
+        if not selected_file:
+            return
+        self._remember_open_dir(selected_file)
+        source_path = Path(selected_file)
+        if is_supported_source_image(source_path):
+            if self._load_prep_source_image(
+                source_path,
+                settings=ImagePrepSettings(dpi=self.DEFAULT_BMP_DPI),
+                mark_dirty=True,
+            ):
+                self._append_log(f"Loaded image prep source: {source_path.name}")
+            self._update_ui_state()
+            return
+        if source_path.suffix.lower() == ".json":
+            self._load_prep_sidecar_path(source_path)
+            self._update_ui_state()
+            return
+        QMessageBox.information(self, "Not supported", "Open a JPG/JPEG image or a Warhol Slicer sidecar JSON.")
+
     def _on_prep_load_sidecar(self) -> None:
         selected_file, _ = QFileDialog.getOpenFileName(
             self,
@@ -1454,7 +1485,10 @@ class MainWindow(QMainWindow):
         if not selected_file:
             return
         self._remember_open_dir(selected_file)
-        sidecar_path = Path(selected_file)
+        self._load_prep_sidecar_path(Path(selected_file))
+        self._update_ui_state()
+
+    def _load_prep_sidecar_path(self, sidecar_path: Path) -> None:
         try:
             source_path, settings, export_bmp_path = read_sidecar(sidecar_path)
         except Exception as exc:
@@ -1470,7 +1504,6 @@ class MainWindow(QMainWindow):
         ):
             self.image_prep_state.dirty = False
             self._append_log(f"Loaded image prep sidecar: {sidecar_path.name}")
-        self._update_ui_state()
 
     def _on_prep_save_outputs(self) -> None:
         if self.image_prep_state.source_image_path is None:
@@ -1787,7 +1820,7 @@ class MainWindow(QMainWindow):
     def _update_resume_line_label(self) -> None:
         max_line = max(0, len(self.job_state.lines) - 1)
         current_line = max(0, min(self.slider_cmd_count.value(), max_line))
-        self.lbl_resume_line.setText(f"Line {current_line} / {max_line}")
+        self.lbl_resume_line.setText(f"Selected line {current_line} / {max_line}")
 
     def _update_draw_session_progress(self, current_command_index: int, *, force_flush: bool = False) -> None:
         start_index = self.streamer.state.start_index
@@ -2287,6 +2320,9 @@ class MainWindow(QMainWindow):
         if not self.job_state.lines:
             QMessageBox.information(self, "No slice", "Slice the image first.")
             return
+        if self.streamer.state.status == SendStatus.RUNNING:
+            QMessageBox.information(self, "Drawing", "Pause drawing before choosing a different start line.")
+            return
         line_number = self._parse_int(self.txt_cmd_start, "Line number")
         if line_number is None:
             return
@@ -2298,7 +2334,43 @@ class MainWindow(QMainWindow):
             start_index = self.job_state.line_to_command_index[line_number]
         else:
             start_index = 3 + (line_number * 2)
+        if self.streamer.state.status == SendStatus.PAUSED:
+            self._restart_paused_stream_from_line(line_number, start_index)
+            return
         self.job_state.current_send_index = start_index
+        self._on_send_image()
+
+    def _restart_paused_stream_from_line(self, line_number: int, start_index: int) -> None:
+        self.draw_session_logger.add_event(
+            "restart_from_line_requested",
+            details={
+                "selected_line_index": line_number,
+                "start_command_index": start_index,
+                "paused_command_index": self.job_state.current_send_index,
+            },
+        )
+        self._append_log(
+            f"Restarting paused draw from selected line {line_number} "
+            f"(command {start_index})."
+        )
+        self._pending_line_restart = (line_number, start_index)
+        self.streamer.reset(emit_stopped=False)
+        self.job_state.paused = False
+        self._is_drawing = False
+        self.btn_pause_drawing.setText("Pause drawing")
+        self._sync_sleep_inhibitor()
+        self._update_ui_state()
+        QTimer.singleShot(0, self._start_pending_line_restart)
+
+    def _start_pending_line_restart(self) -> None:
+        pending = self._pending_line_restart
+        self._pending_line_restart = None
+        if pending is None:
+            return
+        line_number, start_index = pending
+        self.job_state.current_send_index = start_index
+        self.slider_cmd_count.setValue(line_number)
+        self.preview_canvas.set_selected_line(line_number)
         self._on_send_image()
 
     def _on_slider_changed(self, value: int) -> None:
@@ -2580,10 +2652,11 @@ class MainWindow(QMainWindow):
         self.combo_port.setEnabled((not usb_connected) and not interaction_locked)
         self.btn_refresh_ports.setEnabled((not usb_connected) and not interaction_locked)
         self.btn_connect.setEnabled(not interaction_locked)
-        sliced_controls = is_sliced
-        self.slider_cmd_count.setEnabled(sliced_controls)
-        self.btn_slider_dec.setEnabled(sliced_controls)
-        self.btn_slider_inc.setEnabled(sliced_controls)
+        line_selection_controls = is_sliced and (not stream_active or stream_paused)
+        self.txt_cmd_start.setEnabled(line_selection_controls)
+        self.slider_cmd_count.setEnabled(line_selection_controls)
+        self.btn_slider_dec.setEnabled(line_selection_controls)
+        self.btn_slider_inc.setEnabled(line_selection_controls)
         self._update_resume_line_label()
 
         connected_controls = usb_connected and not self._manual_busy and (not stream_active or stream_paused)
@@ -2612,7 +2685,9 @@ class MainWindow(QMainWindow):
         self.btn_send_img.setEnabled(can_draw and not stream_active and not self._manual_busy)
         self.btn_pause_drawing.setEnabled(can_draw and stream_active)
         self.btn_stop_drawing.setEnabled(can_draw and stream_active)
-        self.btn_cmd_start.setEnabled(can_draw and not stream_active and not self._manual_busy)
+        self.btn_cmd_start.setEnabled(
+            can_draw and line_selection_controls and not self._manual_busy
+        )
         self._sync_preview_panel()
 
     def _sync_sleep_inhibitor(self) -> None:
