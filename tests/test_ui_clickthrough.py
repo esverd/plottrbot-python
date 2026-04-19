@@ -225,8 +225,8 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     assert len(window.job_state.gcode) > 1
     assert window.slider_cmd_count.maximum() == len(window.job_state.lines) - 1
 
-    qtbot.mouseClick(window.workflow_buttons["draw"], Qt.MouseButton.LeftButton)
-    assert window.workflow_stack.currentWidget() is window.draw_page
+    qtbot.mouseClick(window.workflow_buttons["connect"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.connect_page
     qtbot.mouseClick(window.btn_slider_inc, Qt.MouseButton.LeftButton)
     assert window.slider_cmd_count.value() == 1
     assert window.preview_canvas.selected_line_index == 1
@@ -262,7 +262,8 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     _wait_manual_idle(qtbot, window)
     assert {"M17", "M18", "G1 Z0", "G1 Z1", "G28"}.issubset(set(transport.sent))
 
-    qtbot.mouseClick(window.workflow_buttons["draw"], Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window.workflow_buttons["place"], Qt.MouseButton.LeftButton)
+    assert window.workflow_stack.currentWidget() is window.place_page
     window.checkbox_bounding_pen.setChecked(False)
     sent_before_bbox = len(transport.sent)
     qtbot.mouseClick(window.btn_bounding_box, Qt.MouseButton.LeftButton)
@@ -287,6 +288,7 @@ def test_ui_clickthrough_full_operator_flow(qtbot, settings_store, tmp_path: Pat
     point_commands = transport.sent[sent_before_point:]
     assert point_commands == [f"G1 X{bbox.min_x:.3f} Y{bbox.min_y:.3f} Z0"]
 
+    qtbot.mouseClick(window.workflow_buttons["connect"], Qt.MouseButton.LeftButton)
     sent_calls_before = len(streamer.send_calls)
     qtbot.mouseClick(window.btn_send_img, Qt.MouseButton.LeftButton)
     assert len(streamer.send_calls) == sent_calls_before + 1

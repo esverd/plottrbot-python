@@ -1,6 +1,6 @@
-# plottrbot-python
+# Warhol Slicer
 
-Phase 1 Python/Linux port of the `plottrbot-csharp` desktop app.
+Warhol Slicer is the Python/Linux desktop app for preparing, placing, and running Plottrbot drawings.
 
 ## Scope in this phase
 
@@ -37,6 +37,13 @@ Per-draw debug logs are stored in the sibling `draw_logs` directory next to that
   - `<image-stem>.plottrbot-edit.json`
 - `Use for job` loads the generated BMP into the Place workflow.
 - If prep-linked settings are changed after using the image for a job, slicing from Place auto-refreshes the processed BMP first.
+
+## Operator flow
+
+1. `Prep`: convert a JPG/JPEG into deterministic Plottrbot-ready BMP output.
+2. `Place`: position the job image, slice it, and trace/check its bounding box on the canvas.
+3. `Run`: connect USB, set motors/tool position, resume from a line if needed, then send/pause/stop.
+4. `Advanced`: use retained-image overlays, raw serial, end GCODE, machine settings, and status logs.
 
 ## Streaming safety behaviors
 

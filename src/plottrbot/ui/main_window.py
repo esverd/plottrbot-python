@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         draw_session_logger: DrawSessionLogger | None = None,
     ) -> None:
         super().__init__()
-        self.setWindowTitle("Plottrbot")
+        self.setWindowTitle("Warhol Slicer")
 
         self.settings_store = settings_store or SettingsStore()
         self.settings = self.settings_store.load()
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(6)
 
-        nav_title = QLabel("Plottrbot")
+        nav_title = QLabel("Warhol Slicer")
         nav_title.setObjectName("workflowNavTitle")
         nav_layout.addWidget(nav_title)
 
@@ -172,8 +172,7 @@ class MainWindow(QMainWindow):
         self.workflow_order: tuple[tuple[str, str], ...] = (
             ("prep", "Prep"),
             ("place", "Place"),
-            ("connect", "Connect"),
-            ("draw", "Draw"),
+            ("connect", "Run"),
             ("advanced", "Advanced"),
         )
         for index, (key, label) in enumerate(self.workflow_order, start=1):
@@ -193,7 +192,6 @@ class MainWindow(QMainWindow):
         self.prep_page = QWidget()
         self.place_page = QWidget()
         self.connect_page = QWidget()
-        self.draw_page = QWidget()
         self.advanced_page = QWidget()
 
         self.image_prep_tab = self.prep_page
@@ -203,14 +201,12 @@ class MainWindow(QMainWindow):
             "prep": self.prep_page,
             "place": self.place_page,
             "connect": self.connect_page,
-            "draw": self.draw_page,
             "advanced": self.advanced_page,
         }
 
         self._build_image_prep_tab()
         self._build_place_page()
         self._build_connect_page()
-        self._build_draw_page()
         self._build_advanced_tab()
 
         for key, _label in self.workflow_order:
@@ -476,55 +472,11 @@ class MainWindow(QMainWindow):
         image_layout.addWidget(self.btn_clear_img)
         image_layout.addWidget(self.btn_slice_img)
         layout.addWidget(image_group)
-        layout.addStretch(1)
 
-    def _build_connect_page(self) -> None:
-        layout = QVBoxLayout(self.connect_page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        robot_group = QGroupBox("USB connection")
-        robot_layout = QVBoxLayout(robot_group)
-        port_row = QHBoxLayout()
-        self.combo_port = QComboBox()
-        self.btn_refresh_ports = QPushButton("Refresh")
-        self.btn_connect = QPushButton("Connect USB")
-        self.btn_connect.setProperty("role", "primary")
-        port_row.addWidget(self.combo_port, 1)
-        port_row.addWidget(self.btn_refresh_ports)
-        port_row.addWidget(self.btn_connect)
-        robot_layout.addLayout(port_row)
-
-        motor_row = QHBoxLayout()
-        self.btn_enable_stepper = QPushButton("Enable motors")
-        self.btn_disable_stepper = QPushButton("Disable motors")
-        motor_row.addWidget(self.btn_enable_stepper)
-        motor_row.addWidget(self.btn_disable_stepper)
-        robot_layout.addLayout(motor_row)
-
-        pen_row = QHBoxLayout()
-        self.btn_pen_touch = QPushButton("Set tool to canvas")
-        self.btn_pen_away = QPushButton("Set away from canvas")
-        pen_row.addWidget(self.btn_pen_touch)
-        pen_row.addWidget(self.btn_pen_away)
-        robot_layout.addLayout(pen_row)
-
-        self.btn_home = QPushButton("Move to home position")
-        robot_layout.addWidget(self.btn_home)
-        layout.addWidget(robot_group)
-        layout.addStretch(1)
-
-    def _build_draw_page(self) -> None:
-        layout = QVBoxLayout(self.draw_page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        robot_group = QGroupBox("Draw controls")
-        robot_layout = QVBoxLayout(robot_group)
-        self.btn_bounding_box = QPushButton("Move in bounding box formation")
-        self.checkbox_bounding_pen = QCheckBox("Use pen when indicating bounding box")
-        self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
-        self.checkbox_stop_recovery.setChecked(True)
+        footprint_group = QGroupBox("Canvas footprint")
+        footprint_layout = QVBoxLayout(footprint_group)
+        self.btn_bounding_box = QPushButton("Trace bounding box")
+        self.checkbox_bounding_pen = QCheckBox("Use pen when tracing bounding box")
 
         self.bbox_point_buttons: dict[str, QPushButton] = {}
         self.bbox_points_panel = QWidget()
@@ -576,6 +528,52 @@ class MainWindow(QMainWindow):
             }
             """
         )
+        footprint_layout.addWidget(self.btn_bounding_box)
+        footprint_layout.addWidget(self.checkbox_bounding_pen)
+        footprint_layout.addWidget(self.bbox_points_panel)
+        layout.addWidget(footprint_group)
+        layout.addStretch(1)
+
+    def _build_connect_page(self) -> None:
+        layout = QVBoxLayout(self.connect_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        robot_group = QGroupBox("Robot setup")
+        robot_layout = QVBoxLayout(robot_group)
+        port_row = QHBoxLayout()
+        self.combo_port = QComboBox()
+        self.btn_refresh_ports = QPushButton("Refresh")
+        self.btn_connect = QPushButton("Connect USB")
+        self.btn_connect.setProperty("role", "primary")
+        port_row.addWidget(self.combo_port, 1)
+        port_row.addWidget(self.btn_refresh_ports)
+        port_row.addWidget(self.btn_connect)
+        robot_layout.addLayout(port_row)
+
+        motor_row = QHBoxLayout()
+        self.btn_enable_stepper = QPushButton("Enable motors")
+        self.btn_disable_stepper = QPushButton("Disable motors")
+        motor_row.addWidget(self.btn_enable_stepper)
+        motor_row.addWidget(self.btn_disable_stepper)
+        robot_layout.addLayout(motor_row)
+
+        pen_row = QHBoxLayout()
+        self.btn_pen_touch = QPushButton("Set tool to canvas")
+        self.btn_pen_away = QPushButton("Set away from canvas")
+        pen_row.addWidget(self.btn_pen_touch)
+        pen_row.addWidget(self.btn_pen_away)
+        robot_layout.addLayout(pen_row)
+
+        self.btn_home = QPushButton("Move to home position")
+        robot_layout.addWidget(self.btn_home)
+        layout.addWidget(robot_group)
+
+        run_group = QGroupBox("Run job")
+        run_layout = QVBoxLayout(run_group)
+        self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
+        self.checkbox_stop_recovery.setChecked(True)
+
         cmd_row = QHBoxLayout()
         self.txt_cmd_start = QLineEdit("0")
         self.btn_cmd_start = QPushButton("Start from line number")
@@ -597,16 +595,13 @@ class MainWindow(QMainWindow):
         self.btn_send_img = QPushButton("Send image to robot")
         self.btn_send_img.setProperty("role", "primary")
         self.btn_stop_drawing.setProperty("role", "danger")
-        robot_layout.addWidget(self.btn_bounding_box)
-        robot_layout.addWidget(self.checkbox_bounding_pen)
-        robot_layout.addWidget(self.bbox_points_panel)
-        robot_layout.addWidget(self.checkbox_stop_recovery)
-        robot_layout.addLayout(cmd_row)
-        robot_layout.addLayout(slider_row)
-        robot_layout.addWidget(self.btn_send_img)
-        robot_layout.addWidget(self.btn_pause_drawing)
-        robot_layout.addWidget(self.btn_stop_drawing)
-        layout.addWidget(robot_group)
+        run_layout.addWidget(self.checkbox_stop_recovery)
+        run_layout.addLayout(cmd_row)
+        run_layout.addLayout(slider_row)
+        run_layout.addWidget(self.btn_send_img)
+        run_layout.addWidget(self.btn_pause_drawing)
+        run_layout.addWidget(self.btn_stop_drawing)
+        layout.addWidget(run_group)
         layout.addStretch(1)
 
     def _build_advanced_tab(self) -> None:
@@ -670,8 +665,8 @@ class MainWindow(QMainWindow):
                 background: #ffffff;
                 border: 1px solid #d8dee6;
                 border-radius: 6px;
-                min-width: 118px;
-                max-width: 118px;
+                min-width: 136px;
+                max-width: 136px;
             }
             QLabel#workflowNavTitle {
                 color: #1f2933;
@@ -995,8 +990,7 @@ class MainWindow(QMainWindow):
 
         title_by_key = {
             "place": "Placement preview",
-            "connect": "Machine preview",
-            "draw": "Draw preview",
+            "connect": "Run preview",
             "advanced": "Machine preview",
         }
         self.lbl_preview_title.setText(title_by_key.get(key, "Preview"))
@@ -1377,7 +1371,7 @@ class MainWindow(QMainWindow):
             self,
             "Select image prep sidecar",
             self._dialog_start_dir(),
-            "Plottrbot sidecar (*.plottrbot-edit.json);;JSON files (*.json);;All files (*.*)",
+            "Warhol Slicer sidecar (*.plottrbot-edit.json);;JSON files (*.json);;All files (*.*)",
         )
         if not selected_file:
             return
@@ -2244,6 +2238,7 @@ class MainWindow(QMainWindow):
         self.preview_canvas.set_bbox_overlay(bbox, visible=True)
 
         if not self.transport.is_connected:
+            self._show_toast("Bounding box shown in preview. Connect USB to trace it on the canvas.")
             return
         within_bounds, error = self._validate_bbox_within_bounds()
         if not within_bounds:
@@ -2478,8 +2473,9 @@ class MainWindow(QMainWindow):
         for button in self.bbox_point_buttons.values():
             button.setEnabled(bbox_point_controls)
 
+        can_trace_bbox = is_sliced and not stream_active and not self._manual_busy
         can_draw = is_sliced and usb_connected
-        self.btn_bounding_box.setEnabled(can_draw and not stream_active and not self._manual_busy)
+        self.btn_bounding_box.setEnabled(can_trace_bbox)
         self.btn_send_img.setEnabled(can_draw and not stream_active and not self._manual_busy)
         self.btn_pause_drawing.setEnabled(can_draw and stream_active)
         self.btn_stop_drawing.setEnabled(can_draw and stream_active)

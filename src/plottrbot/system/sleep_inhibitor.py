@@ -36,8 +36,8 @@ class SleepInhibitor:
                 [
                     "systemd-inhibit",
                     "--what=sleep",
-                    "--who=plottrbot",
-                    "--why=Plottrbot active USB streaming",
+                    "--who=warhol-slicer",
+                    "--why=Warhol Slicer active USB streaming",
                     "--mode=block",
                     "sleep",
                     "infinity",

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "plottrbot"
 version = "0.1.0"
-description = "Linux desktop controller for Plottrbot robot"
+description = "Warhol Slicer desktop controller for Plottrbot robot"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -858,7 +858,7 @@ def test_image_prep_sidecar_load_restores_settings(qtbot, settings_store, tmp_pa
     monkeypatch.setattr(
         QFileDialog,
         "getOpenFileName",
-        lambda *_a, **_k: (str(sidecar_path), "Plottrbot sidecar (*.plottrbot-edit.json)"),
+        lambda *_a, **_k: (str(sidecar_path), "Warhol Slicer sidecar (*.plottrbot-edit.json)"),
     )
     window._on_prep_load_sidecar()
 
@@ -996,8 +996,7 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
     assert tuple(label for _key, label in window.workflow_order) == (
         "Prep",
         "Place",
-        "Connect",
-        "Draw",
+        "Run",
         "Advanced",
     )
     assert window.workflow_stack.currentWidget() is window.prep_page
