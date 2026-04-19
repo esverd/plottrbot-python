@@ -124,6 +124,26 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
     assert loaded_settings.to_dict() == sanitized.to_dict()
 
 
+def test_sidecar_write_resolves_relative_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    image_path = Path("relative.jpg")
+    _create_gradient_jpg(image_path, width=32, height=32)
+    settings, artifacts = process_image_for_prep(image_path=image_path, settings=ImagePrepSettings())
+    sidecar_path = Path("relative.plottrbot-edit.json")
+
+    write_sidecar(
+        sidecar_path=sidecar_path,
+        source_image_path=image_path,
+        settings=settings,
+        effective_thresholds=artifacts.effective_thresholds,
+        export_bmp_path=Path("relative.plottrbot.processed.bmp"),
+    )
+
+    loaded_source, _loaded_settings, loaded_export = read_sidecar(sidecar_path)
+    assert loaded_source == image_path.resolve()
+    assert loaded_export == Path("relative.plottrbot.processed.bmp").resolve()
+
+
 def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> None:
     image_path = tmp_path / "masked.jpg"
     _create_gradient_jpg(image_path, width=80, height=80)

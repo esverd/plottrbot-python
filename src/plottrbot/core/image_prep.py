@@ -140,6 +140,13 @@ def sidecar_path_for_image(image_path: Path) -> Path:
     return image_path.with_name(f"{image_path.stem}.plottrbot-edit.json")
 
 
+def _safe_resolved_path(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 def is_supported_source_image(image_path: Path) -> bool:
     return image_path.suffix.lower() in {".jpg", ".jpeg"}
 
@@ -537,12 +544,14 @@ def write_sidecar(
     effective_thresholds: list[int],
     export_bmp_path: Path | None,
 ) -> None:
+    resolved_source = _safe_resolved_path(source_image_path)
+    resolved_export = _safe_resolved_path(export_bmp_path) if export_bmp_path is not None else None
     payload: dict[str, Any] = {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "saved_at_utc": _utc_now_iso(),
-        "source_image_path": str(source_image_path),
+        "source_image_path": str(resolved_source),
         "source_image_name": source_image_path.name,
-        "export_bmp_path": str(export_bmp_path) if export_bmp_path is not None else None,
+        "export_bmp_path": str(resolved_export) if resolved_export is not None else None,
         "settings": settings.to_dict(),
         "effective_thresholds": [int(value) for value in effective_thresholds],
     }
