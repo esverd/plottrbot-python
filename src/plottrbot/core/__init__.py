@@ -1,6 +1,7 @@
 from plottrbot.core.bmp_converter import BmpConverter
 from plottrbot.core.image_prep import (
     ImagePrepArtifacts,
+    ImagePrepMask,
     ImagePrepSettings,
     ImagePrepState,
     process_image_for_prep,
@@ -18,6 +19,7 @@ from plottrbot.core.state_machine import UiState, derive_ui_state
 __all__ = [
     "BmpConverter",
     "ImagePrepSettings",
+    "ImagePrepMask",
     "ImagePrepArtifacts",
     "ImagePrepState",
     "process_image_for_prep",

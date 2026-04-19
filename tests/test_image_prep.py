@@ -6,6 +6,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from plottrbot.core.image_prep import (
+    ImagePrepMask,
     ImagePrepSettings,
     parse_threshold_text,
     process_image_for_prep,
@@ -83,6 +84,16 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
         auto_thresholds=False,
         manual_thresholds=[40, 90, 150, 220],
         show_halftone_preview=True,
+        local_masks=[
+            ImagePrepMask(
+                center_x=0.25,
+                center_y=0.75,
+                radius=0.18,
+                feather=0.02,
+                contrast_percent=180,
+                blur_radius=1.4,
+            )
+        ],
     )
     sanitized, artifacts = process_image_for_prep(image_path=image_path, settings=settings)
 
@@ -111,6 +122,52 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
     assert loaded_export is not None
     assert loaded_export.resolve() == export_bmp_path.resolve()
     assert loaded_settings.to_dict() == sanitized.to_dict()
+
+
+def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> None:
+    image_path = tmp_path / "masked.jpg"
+    _create_gradient_jpg(image_path, width=80, height=80)
+
+    base_settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=False,
+        manual_thresholds=[64, 128, 192],
+    )
+    masked_settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+        levels=4,
+        strategy="banded",
+        auto_thresholds=False,
+        manual_thresholds=[64, 128, 192],
+        local_masks=[
+            ImagePrepMask(
+                center_x=0.4,
+                center_y=0.5,
+                radius=0.25,
+                feather=0.0,
+                contrast_percent=350,
+                blur_radius=0.0,
+            )
+        ],
+    )
+
+    _, base_artifacts = process_image_for_prep(image_path=image_path, settings=base_settings)
+    sanitized, masked_artifacts = process_image_for_prep(image_path=image_path, settings=masked_settings)
+
+    assert sanitized.local_masks[0].contrast_percent == 350
+    base_tonal = base_artifacts.tonal_preview_image.convert("L")
+    masked_tonal = masked_artifacts.tonal_preview_image.convert("L")
+    center = (int(round(base_tonal.width * 0.4)), base_tonal.height // 2)
+    corner = (0, 0)
+
+    assert masked_tonal.getpixel(center) != base_tonal.getpixel(center)
+    assert masked_tonal.getpixel(corner) == base_tonal.getpixel(corner)
 
 
 def test_dimensions_and_dpi_control_processed_resolution(tmp_path: Path) -> None:

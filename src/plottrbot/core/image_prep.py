@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 PrepStrategy = Literal["banded", "relative"]
 
@@ -15,7 +15,7 @@ MAX_LEVELS = 8
 MIN_THRESHOLD = 5
 MAX_THRESHOLD = 250
 MIN_THRESHOLD_GAP = 8
-SIDECAR_SCHEMA_VERSION = 1
+SIDECAR_SCHEMA_VERSION = 2
 MAX_RENDER_SIDE_PX = 12000
 MAX_RENDER_PIXELS = 36_000_000
 MIN_CONTRAST_PERCENT = -100
@@ -28,6 +28,10 @@ def _utc_now_iso() -> str:
 
 def _clamp(value: int, min_value: int, max_value: int) -> int:
     return max(min_value, min(max_value, int(value)))
+
+
+def _clamp_float(value: float, min_value: float, max_value: float) -> float:
+    return max(min_value, min(max_value, float(value)))
 
 
 def _coerce_int(value: object, fallback: int) -> int:
@@ -141,6 +145,51 @@ def is_supported_source_image(image_path: Path) -> bool:
 
 
 @dataclass(slots=True)
+class ImagePrepMask:
+    center_x: float = 0.5
+    center_y: float = 0.5
+    radius: float = 0.2
+    feather: float = 0.04
+    contrast_percent: int = 0
+    blur_radius: float = 0.0
+
+    def sanitized(self) -> ImagePrepMask:
+        return ImagePrepMask(
+            center_x=_clamp_float(self.center_x, 0.0, 1.0),
+            center_y=_clamp_float(self.center_y, 0.0, 1.0),
+            radius=_clamp_float(self.radius, 0.01, 1.0),
+            feather=_clamp_float(self.feather, 0.0, 0.5),
+            contrast_percent=_clamp(
+                int(round(self.contrast_percent)),
+                MIN_CONTRAST_PERCENT,
+                MAX_CONTRAST_PERCENT,
+            ),
+            blur_radius=max(0.0, float(self.blur_radius)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "center_x": float(self.center_x),
+            "center_y": float(self.center_y),
+            "radius": float(self.radius),
+            "feather": float(self.feather),
+            "contrast_percent": int(self.contrast_percent),
+            "blur_radius": float(self.blur_radius),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ImagePrepMask:
+        return cls(
+            center_x=_coerce_float(payload.get("center_x"), 0.5),
+            center_y=_coerce_float(payload.get("center_y"), 0.5),
+            radius=_coerce_float(payload.get("radius"), 0.2),
+            feather=_coerce_float(payload.get("feather"), 0.04),
+            contrast_percent=_coerce_int(payload.get("contrast_percent"), 0),
+            blur_radius=_coerce_float(payload.get("blur_radius"), 0.0),
+        ).sanitized()
+
+
+@dataclass(slots=True)
 class ImagePrepSettings:
     dpi: int = 35
     target_width_mm: float = 0.0
@@ -152,6 +201,7 @@ class ImagePrepSettings:
     auto_thresholds: bool = True
     manual_thresholds: list[int] = field(default_factory=list)
     show_halftone_preview: bool = False
+    local_masks: list[ImagePrepMask] = field(default_factory=list)
 
     def sanitized(self) -> ImagePrepSettings:
         strategy: PrepStrategy
@@ -164,6 +214,7 @@ class ImagePrepSettings:
         blur_radius = max(0.0, float(self.blur_radius))
         auto_thresholds = bool(self.auto_thresholds)
         manual_thresholds = normalize_thresholds(self.manual_thresholds, levels=levels)
+        local_masks = [mask.sanitized() for mask in self.local_masks]
         return ImagePrepSettings(
             dpi=dpi,
             target_width_mm=target_width_mm,
@@ -175,6 +226,7 @@ class ImagePrepSettings:
             auto_thresholds=auto_thresholds,
             manual_thresholds=manual_thresholds,
             show_halftone_preview=bool(self.show_halftone_preview),
+            local_masks=local_masks,
         )
 
     def effective_thresholds(self) -> list[int]:
@@ -195,12 +247,20 @@ class ImagePrepSettings:
             "auto_thresholds": bool(self.auto_thresholds),
             "manual_thresholds": [int(value) for value in self.manual_thresholds],
             "show_halftone_preview": bool(self.show_halftone_preview),
+            "local_masks": [mask.sanitized().to_dict() for mask in self.local_masks],
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ImagePrepSettings:
         strategy_value = str(payload.get("strategy", "banded")).strip().lower()
         strategy: PrepStrategy = "relative" if strategy_value == "relative" else "banded"
+        masks: list[ImagePrepMask] = []
+        raw_masks = payload.get("local_masks", payload.get("masks", []))
+        if isinstance(raw_masks, list):
+            for raw_mask in raw_masks:
+                if isinstance(raw_mask, dict):
+                    masks.append(ImagePrepMask.from_dict(raw_mask))
+
         settings = cls(
             dpi=max(1, _coerce_int(payload.get("dpi"), 35)),
             target_width_mm=max(0.0, _coerce_float(payload.get("target_width_mm"), 0.0)),
@@ -218,6 +278,7 @@ class ImagePrepSettings:
                 _coerce_int(value, 0) for value in payload.get("manual_thresholds", []) if value is not None
             ],
             show_halftone_preview=_coerce_bool(payload.get("show_halftone_preview"), False),
+            local_masks=masks,
         )
         return settings.sanitized()
 
@@ -300,6 +361,64 @@ def _build_line_halftone_pixels(
     return output
 
 
+def _circle_mask_image(
+    *,
+    size: tuple[int, int],
+    prep_mask: ImagePrepMask,
+) -> Image.Image:
+    width, height = size
+    span = max(1, min(width, height))
+    radius_px = max(1.0, prep_mask.radius * span)
+    center_x = prep_mask.center_x * max(width - 1, 1)
+    center_y = prep_mask.center_y * max(height - 1, 1)
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse(
+        (
+            center_x - radius_px,
+            center_y - radius_px,
+            center_x + radius_px,
+            center_y + radius_px,
+        ),
+        fill=255,
+    )
+    feather_px = prep_mask.feather * span
+    if feather_px > 0.0:
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=feather_px / 2.0))
+    return mask
+
+
+def _adjust_grayscale(image: Image.Image, *, contrast_percent: int, blur_radius: float) -> Image.Image:
+    adjusted = image
+    if contrast_percent != 0:
+        contrast_factor = max(0.0, 1.0 + (contrast_percent / 100.0))
+        adjusted = ImageEnhance.Contrast(adjusted).enhance(contrast_factor)
+    if blur_radius > 0.0:
+        adjusted = adjusted.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    return adjusted
+
+
+def _apply_local_masks(
+    *,
+    base_image: Image.Image,
+    source_image: Image.Image,
+    masks: list[ImagePrepMask],
+) -> Image.Image:
+    if not masks:
+        return base_image
+    result = base_image.copy()
+    for prep_mask in masks:
+        mask = prep_mask.sanitized()
+        local_adjusted = _adjust_grayscale(
+            source_image,
+            contrast_percent=mask.contrast_percent,
+            blur_radius=mask.blur_radius,
+        )
+        alpha = _circle_mask_image(size=result.size, prep_mask=mask)
+        result = Image.composite(local_adjusted, result, alpha)
+    return result
+
+
 def process_image_for_prep(
     *,
     image_path: Path,
@@ -314,12 +433,12 @@ def process_image_for_prep(
     thresholds = sanitized.effective_thresholds()
 
     with Image.open(image_path) as source:
-        grayscale = source.convert("L")
-        if sanitized.contrast_percent != 0:
-            contrast_factor = max(0.0, 1.0 + (sanitized.contrast_percent / 100.0))
-            grayscale = ImageEnhance.Contrast(grayscale).enhance(contrast_factor)
-        if sanitized.blur_radius > 0.0:
-            grayscale = grayscale.filter(ImageFilter.GaussianBlur(radius=sanitized.blur_radius))
+        raw_grayscale = source.convert("L")
+        grayscale = _adjust_grayscale(
+            raw_grayscale,
+            contrast_percent=sanitized.contrast_percent,
+            blur_radius=sanitized.blur_radius,
+        )
         source_width_px, source_height_px = grayscale.size
 
         source_width_mm = (source_width_px / sanitized.dpi) * 25.4
@@ -342,6 +461,13 @@ def process_image_for_prep(
             )
         if (target_width_px, target_height_px) != grayscale.size:
             grayscale = grayscale.resize((target_width_px, target_height_px), Image.Resampling.BILINEAR)
+            raw_grayscale = raw_grayscale.resize((target_width_px, target_height_px), Image.Resampling.BILINEAR)
+
+        grayscale = _apply_local_masks(
+            base_image=grayscale,
+            source_image=raw_grayscale,
+            masks=sanitized.local_masks,
+        )
 
         width, height = grayscale.size
         values = list(grayscale.tobytes())
