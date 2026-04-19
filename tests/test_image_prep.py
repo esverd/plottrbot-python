@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,7 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
                 width=0.42,
                 height=0.26,
                 roundness_percent=65,
+                rotation_degrees=32.0,
                 feather=0.02,
                 exposure_percent=35,
                 contrast_percent=180,
@@ -156,6 +158,7 @@ def test_legacy_radius_mask_migrates_to_rounded_square() -> None:
     assert mask.width == pytest.approx(0.5)
     assert mask.height == pytest.approx(0.5)
     assert mask.roundness_percent == 100
+    assert mask.rotation_degrees == pytest.approx(0.0)
 
 
 def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> None:
@@ -186,6 +189,7 @@ def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> Non
                 width=0.5,
                 height=0.25,
                 roundness_percent=0,
+                rotation_degrees=90.0,
                 feather=0.0,
                 exposure_percent=-35,
                 contrast_percent=350,
@@ -202,6 +206,7 @@ def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> Non
     assert sanitized.local_masks[0].width == pytest.approx(0.5, abs=0.01)
     assert sanitized.local_masks[0].height == pytest.approx(0.25, abs=0.01)
     assert sanitized.local_masks[0].roundness_percent == 0
+    assert sanitized.local_masks[0].rotation_degrees == pytest.approx(90.0, abs=0.01)
     base_tonal = base_artifacts.tonal_preview_image.convert("L")
     masked_tonal = masked_artifacts.tonal_preview_image.convert("L")
     center = (int(round(base_tonal.width * 0.4)), base_tonal.height // 2)
@@ -239,6 +244,7 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
                 width=0.6,
                 height=0.6,
                 roundness_percent=100,
+                rotation_degrees=45.0,
                 feather=0.08,
                 exposure_percent=45,
                 contrast_percent=120,
@@ -252,6 +258,38 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
 
     assert masked_artifacts.tonal_preview_image.tobytes() == base_artifacts.tonal_preview_image.tobytes()
     assert masked_artifacts.export_bmp_image.tobytes() == base_artifacts.export_bmp_image.tobytes()
+
+
+def test_rotated_local_mask_changes_mask_footprint(tmp_path: Path) -> None:
+    image_path = tmp_path / "rotated_mask.jpg"
+    _create_gradient_jpg(image_path, width=80, height=80)
+
+    base_mask = ImagePrepMask(
+        center_x=0.5,
+        center_y=0.5,
+        width=0.7,
+        height=0.18,
+        roundness_percent=0,
+        exposure_percent=-60,
+    )
+    settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+        local_masks=[base_mask],
+    )
+    rotated_settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+        local_masks=[replace(base_mask, rotation_degrees=90.0)],
+    )
+
+    _, straight_artifacts = process_image_for_prep(image_path=image_path, settings=settings)
+    sanitized, rotated_artifacts = process_image_for_prep(image_path=image_path, settings=rotated_settings)
+
+    assert sanitized.local_masks[0].rotation_degrees == pytest.approx(90.0)
+    assert straight_artifacts.tonal_preview_image.tobytes() != rotated_artifacts.tonal_preview_image.tobytes()
 
 
 def test_global_exposure_adjusts_tonal_output(tmp_path: Path) -> None:

@@ -1201,6 +1201,7 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     window.slider_prep_mask_width.setValue(55)
     window.slider_prep_mask_height.setValue(35)
     window.slider_prep_mask_roundness.setValue(75)
+    window.slider_prep_mask_rotation.setValue(-30)
     window.slider_prep_mask_feather.setValue(8)
     window.slider_prep_mask_exposure.setValue(-20)
     window.slider_prep_mask_contrast.setValue(240)
@@ -1213,12 +1214,14 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert mask.width == pytest.approx(0.55, abs=0.01)
     assert mask.height == pytest.approx(0.35, abs=0.01)
     assert mask.roundness_percent == 75
+    assert mask.rotation_degrees == pytest.approx(-30.0, abs=0.01)
     assert mask.feather == pytest.approx(0.08, abs=0.01)
     assert mask.exposure_percent == -20
     assert mask.blur_radius == pytest.approx(1.7, abs=0.01)
     assert window.lbl_prep_mask_width_value.text() == "55%"
     assert window.lbl_prep_mask_height_value.text() == "35%"
     assert window.lbl_prep_mask_roundness_value.text() == "75%"
+    assert window.lbl_prep_mask_rotation_value.text() == "-30 deg"
     assert window.lbl_prep_mask_feather_value.text() == "8%"
     assert window.lbl_prep_mask_exposure_value.text() == "-20"
     assert window.lbl_prep_mask_contrast_value.text() == "+240"
@@ -1238,6 +1241,7 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert loaded_settings.local_masks[0].width == pytest.approx(0.55, abs=0.01)
     assert loaded_settings.local_masks[0].height == pytest.approx(0.35, abs=0.01)
     assert loaded_settings.local_masks[0].roundness_percent == 75
+    assert loaded_settings.local_masks[0].rotation_degrees == pytest.approx(-30.0, abs=0.01)
     assert loaded_settings.local_masks[0].exposure_percent == -20
     assert loaded_settings.local_masks[0].contrast_percent == 240
 

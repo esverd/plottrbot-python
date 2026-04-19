@@ -161,6 +161,7 @@ class ImagePrepMask:
     width: float = 0.0
     height: float = 0.0
     roundness_percent: int = 100
+    rotation_degrees: float = 0.0
     feather: float = 0.04
     exposure_percent: int = 0
     contrast_percent: int = 0
@@ -177,6 +178,7 @@ class ImagePrepMask:
             width=width,
             height=height,
             roundness_percent=_clamp(int(round(self.roundness_percent)), 0, 100),
+            rotation_degrees=_clamp_float(self.rotation_degrees, -180.0, 180.0),
             feather=_clamp_float(self.feather, 0.0, 0.5),
             exposure_percent=_clamp(
                 int(round(self.exposure_percent)),
@@ -199,6 +201,7 @@ class ImagePrepMask:
             "width": float(self.width),
             "height": float(self.height),
             "roundness_percent": int(self.roundness_percent),
+            "rotation_degrees": float(self.rotation_degrees),
             "feather": float(self.feather),
             "exposure_percent": int(self.exposure_percent),
             "contrast_percent": int(self.contrast_percent),
@@ -214,6 +217,7 @@ class ImagePrepMask:
             width=_coerce_float(payload.get("width"), 0.0),
             height=_coerce_float(payload.get("height"), 0.0),
             roundness_percent=_coerce_int(payload.get("roundness_percent", payload.get("roundness")), 100),
+            rotation_degrees=_coerce_float(payload.get("rotation_degrees", payload.get("rotation")), 0.0),
             feather=_coerce_float(payload.get("feather"), 0.04),
             exposure_percent=_coerce_int(payload.get("exposure_percent"), 0),
             contrast_percent=_coerce_int(payload.get("contrast_percent"), 0),
@@ -429,6 +433,13 @@ def _local_mask_image(
         radius=max(0.0, corner_radius),
         fill=255,
     )
+    if abs(prep_mask.rotation_degrees) > 0.001:
+        mask = mask.rotate(
+            -prep_mask.rotation_degrees,
+            resample=Image.Resampling.BICUBIC,
+            center=(center_x, center_y),
+            fillcolor=0,
+        )
     feather_px = prep_mask.feather * span
     if feather_px > 0.0:
         mask = mask.filter(ImageFilter.GaussianBlur(radius=feather_px / 2.0))

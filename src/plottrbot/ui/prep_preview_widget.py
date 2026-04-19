@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QLabel, QWidget
 
 from plottrbot.core.image_prep import ImagePrepMask
@@ -61,8 +61,14 @@ class PrepPreviewWidget(QLabel):
         if self._pixmap_rect().isEmpty():
             return -1
         for index in range(len(self._masks) - 1, -1, -1):
-            _center, mask_rect, _corner_radius = self._mask_geometry(self._masks[index])
-            if mask_rect.adjusted(-6.0, -6.0, 6.0, 6.0).contains(point):
+            center, mask_rect, _corner_radius = self._mask_geometry(self._masks[index])
+            transform = QTransform()
+            transform.translate(center.x(), center.y())
+            transform.rotate(self._masks[index].rotation_degrees)
+            transform.translate(-center.x(), -center.y())
+            inverse, invertible = transform.inverted()
+            test_point = inverse.map(point) if invertible else point
+            if mask_rect.adjusted(-6.0, -6.0, 6.0, 6.0).contains(test_point):
                 return index
         return -1
 
@@ -90,7 +96,12 @@ class PrepPreviewWidget(QLabel):
             color = QColor(21, 111, 191, 230) if selected else QColor(70, 86, 106, 170)
             painter.setPen(QPen(color, 3 if selected else 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.save()
+            painter.translate(center)
+            painter.rotate(mask.rotation_degrees)
+            painter.translate(-center.x(), -center.y())
             painter.drawRoundedRect(mask_rect, corner_radius, corner_radius)
+            painter.restore()
             painter.setPen(QPen(color, 1))
             painter.drawLine(QPointF(center.x() - 7, center.y()), QPointF(center.x() + 7, center.y()))
             painter.drawLine(QPointF(center.x(), center.y() - 7), QPointF(center.x(), center.y() + 7))

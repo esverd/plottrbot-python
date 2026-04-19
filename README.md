@@ -59,7 +59,7 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
 - Preview can toggle between tonal and halftone views.
-- `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, feathering, and image adjustments with sliders.
+- `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
   - `<image-stem>.plottrbot-edit.json`
