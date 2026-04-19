@@ -23,6 +23,8 @@ dev = [
 
 [project.scripts]
 plottrbot = "plottrbot.app:main"
+warhol-slicer = "plottrbot.app:main"
+warhol-slicer-demo = "plottrbot.app:dummy_serial_main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -19,8 +19,34 @@ pip install -e ".[dev]"
 python3 -m plottrbot
 ```
 
+On Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+python -m plottrbot
+```
+
 Settings are stored at `~/.config/plottrbot/config.json`.
 Per-draw debug logs are stored in the sibling `draw_logs` directory next to that config file.
+
+## Debug without hardware
+
+Use dummy serial mode when you want to click through the app, test slicing, and stream generated commands without a Nano connected:
+
+```bash
+python3 -m plottrbot --dummy-serial
+```
+
+If the package is installed in editable mode, these console commands are also available:
+
+```bash
+warhol-slicer --dummy-serial
+warhol-slicer-demo
+```
+
+Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every non-empty command with the configured `GO` token, and writes the same UI/status logs as the normal streamer. It does not send anything to real hardware.
 
 ## Image Prep Workflow
 

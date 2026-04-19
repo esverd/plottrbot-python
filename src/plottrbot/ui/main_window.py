@@ -49,6 +49,7 @@ from plottrbot.core.image_prep import (
 )
 from plottrbot.core.models import JobState, RetainedImage
 from plottrbot.core.state_machine import UiState, derive_ui_state
+from plottrbot.serial.dummy_transport import DummyTransport
 from plottrbot.serial.nano_transport import NanoTransport
 from plottrbot.serial.program_streamer import ProgramStreamer, SendSessionState, SendStatus
 from plottrbot.system.sleep_inhibitor import SleepInhibitor
@@ -98,6 +99,7 @@ class MainWindow(QMainWindow):
         converter: BmpConverter | None = None,
         sleep_inhibitor: SleepInhibitor | None = None,
         draw_session_logger: DrawSessionLogger | None = None,
+        dummy_serial: bool = False,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Warhol Slicer")
@@ -120,10 +122,19 @@ class MainWindow(QMainWindow):
         self.converter = converter or BmpConverter(self.settings.machine_profile)
         self.bridge = UiBridge()
 
-        self.transport = transport or NanoTransport(
-            self.settings.machine_profile,
-            on_log=self.bridge.log_signal.emit,
-        )
+        self._dummy_serial_enabled = dummy_serial and transport is None
+        if transport is not None:
+            self.transport = transport
+        elif dummy_serial:
+            self.transport = DummyTransport(
+                self.settings.machine_profile,
+                on_log=self.bridge.log_signal.emit,
+            )
+        else:
+            self.transport = NanoTransport(
+                self.settings.machine_profile,
+                on_log=self.bridge.log_signal.emit,
+            )
         self.streamer = streamer or ProgramStreamer(
             self.transport,
             on_state=self.bridge.stream_state_signal.emit,
@@ -146,6 +157,8 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._refresh_ports()
         self._populate_defaults()
+        if self._dummy_serial_enabled:
+            self._append_log("Dummy serial mode enabled. Hardware commands will be simulated.")
         self._update_ui_state()
 
     def _build_ui(self) -> None:
