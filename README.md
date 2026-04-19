@@ -46,7 +46,7 @@ warhol-slicer --dummy-serial
 warhol-slicer-demo
 ```
 
-Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every non-empty command with the configured `GO` token, and writes the same UI/status logs as the normal streamer. It does not send anything to real hardware.
+Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every non-empty command with the configured `GO` token at a throttled debug pace, and writes the same UI/status logs as the normal streamer. It does not send anything to real hardware.
 
 ## Image Prep Workflow
 
@@ -61,13 +61,13 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 - `Save BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
   - `<image-stem>.plottrbot-edit.json`
-- `Use for job` loads the generated BMP into the Place workflow.
-- If prep-linked settings are changed after using the image for a job, slicing from Place auto-refreshes the processed BMP first.
+- `Use in Place` loads the generated BMP into the Place Job workflow.
+- If prep-linked settings are changed after using the image for a job, slicing from Place Job auto-refreshes the processed BMP first.
 
 ## Operator flow
 
 1. `Prep`: convert a JPG/JPEG into deterministic Plottrbot-ready BMP output.
-2. `Place`: position the job image, slice it, and trace/check its bounding box on the canvas.
+2. `Place Job`: position the job image, slice it, then use connected footprint tools to trace/check its bounding box on the canvas.
 3. `Run`: connect USB, set motors/tool position, resume from a line if needed, then send/pause/stop.
 4. `Advanced`: use retained-image overlays, raw serial, end GCODE, machine settings, and status logs.
 

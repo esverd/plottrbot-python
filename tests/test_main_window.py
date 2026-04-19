@@ -184,7 +184,9 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
     window._on_slice_image()
     assert window.slider_cmd_count.isEnabled() is True
     assert window.btn_send_img.isEnabled() is False
-    assert window.lbl_bbox_hint.text() == "Preview the footprint now, or connect USB to trace it on the canvas."
+    assert window.btn_bounding_box.isEnabled() is False
+    assert window.lbl_bbox_hint.text() == "Connect USB in Run to trace the footprint on the canvas."
+    assert window.lbl_resume_line.text().startswith("Line 0 / ")
     assert window.lbl_run_state.text() == "Ready to connect"
 
     transport.connected = True
@@ -1003,14 +1005,14 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
 
     assert tuple(label for _key, label in window.workflow_order) == (
         "Prep",
-        "Place",
+        "Place Job",
         "Run",
         "Advanced",
     )
     assert window.workflow_stack.currentWidget() is window.prep_page
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
     assert window.workflow_buttons["prep"].isChecked() is True
-    assert window.lbl_bbox_hint.text() == "Slice image to enable footprint tools."
+    assert window.lbl_bbox_hint.text() == "Slice image, then connect USB to use footprint tools."
     assert window.lbl_run_state.text() == "No job image"
 
     window._set_workflow_page("place")
@@ -1023,6 +1025,9 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
 
     window._set_workflow_page("prep")
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
+    window.btn_prep_skip_to_place.click()
+    assert window.workflow_stack.currentWidget() is window.place_page
+    window._set_workflow_page("prep")
 
     jpg_path = tmp_path / "toast.jpg"
     _create_simple_jpg(jpg_path)

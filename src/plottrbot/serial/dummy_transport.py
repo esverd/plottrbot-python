@@ -17,7 +17,7 @@ class DummyTransport:
         profile: MachineProfile,
         on_log: LogCallback | None = None,
         *,
-        ack_delay_seconds: float = 0.0,
+        ack_delay_seconds: float = 0.01,
     ) -> None:
         self.profile = profile
         self._on_log = on_log

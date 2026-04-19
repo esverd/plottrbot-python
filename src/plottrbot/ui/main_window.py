@@ -184,7 +184,7 @@ class MainWindow(QMainWindow):
         self.workflow_buttons: dict[str, QPushButton] = {}
         self.workflow_order: tuple[tuple[str, str], ...] = (
             ("prep", "Prep"),
-            ("place", "Place"),
+            ("place", "Place Job"),
             ("connect", "Run"),
             ("advanced", "Advanced"),
         )
@@ -303,8 +303,10 @@ class MainWindow(QMainWindow):
         source_buttons = QHBoxLayout()
         self.btn_prep_load_jpg = QPushButton("Load JPG")
         self.btn_prep_load_sidecar = QPushButton("Load sidecar")
+        self.btn_prep_skip_to_place = QPushButton("Place BMP/job")
         source_buttons.addWidget(self.btn_prep_load_jpg)
         source_buttons.addWidget(self.btn_prep_load_sidecar)
+        source_buttons.addWidget(self.btn_prep_skip_to_place)
         source_layout.addLayout(source_buttons)
 
         self.lbl_prep_source = QLabel("Source: none")
@@ -388,12 +390,12 @@ class MainWindow(QMainWindow):
         self.spin_prep_levels = QSpinBox()
         self.spin_prep_levels.setRange(2, 8)
         self.spin_prep_levels.setValue(4)
-        controls_layout.addWidget(QLabel("Levels"), 4, 0)
+        controls_layout.addWidget(QLabel("Tone levels"), 4, 0)
         controls_layout.addWidget(self.spin_prep_levels, 4, 1)
 
         self.combo_prep_strategy = QComboBox()
         self.combo_prep_strategy.addItems(["banded", "relative"])
-        controls_layout.addWidget(QLabel("Threshold strategy"), 4, 2)
+        controls_layout.addWidget(QLabel("Threshold mode"), 4, 2)
         controls_layout.addWidget(self.combo_prep_strategy, 4, 3)
 
         self.checkbox_prep_lock_aspect = QCheckBox("Lock aspect ratio")
@@ -443,7 +445,7 @@ class MainWindow(QMainWindow):
 
         action_row = QHBoxLayout()
         self.btn_prep_save_outputs = QPushButton("Save BMP + sidecar")
-        self.btn_prep_apply_to_control = QPushButton("Use for job")
+        self.btn_prep_apply_to_control = QPushButton("Use in Place")
         self.btn_prep_reset_defaults = QPushButton("Reset defaults")
         self.btn_prep_apply_to_control.setProperty("role", "primary")
         action_row.addWidget(self.btn_prep_save_outputs)
@@ -495,7 +497,7 @@ class MainWindow(QMainWindow):
 
         footprint_group = QGroupBox("Canvas footprint")
         footprint_layout = QVBoxLayout(footprint_group)
-        self.lbl_bbox_hint = QLabel("Slice image to enable footprint tools.")
+        self.lbl_bbox_hint = QLabel("Slice image, then connect USB to use footprint tools.")
         self.lbl_bbox_hint.setObjectName("secondaryInfo")
         self.lbl_bbox_hint.setWordWrap(True)
         self.btn_bounding_box = QPushButton("Trace bounding box")
@@ -603,7 +605,9 @@ class MainWindow(QMainWindow):
 
         cmd_row = QHBoxLayout()
         self.txt_cmd_start = QLineEdit("0")
-        self.btn_cmd_start = QPushButton("Start from line number")
+        self.btn_cmd_start = QPushButton("Resume from drawn line")
+        self.lbl_resume_line = QLabel("Line 0 / 0")
+        self.lbl_resume_line.setObjectName("secondaryInfo")
         cmd_row.addWidget(self.txt_cmd_start)
         cmd_row.addWidget(self.btn_cmd_start)
 
@@ -624,6 +628,7 @@ class MainWindow(QMainWindow):
         self.btn_stop_drawing.setProperty("role", "danger")
         run_layout.addWidget(self.lbl_run_state)
         run_layout.addWidget(self.checkbox_stop_recovery)
+        run_layout.addWidget(self.lbl_resume_line)
         run_layout.addLayout(cmd_row)
         run_layout.addLayout(slider_row)
         run_layout.addWidget(self.btn_send_img)
@@ -679,6 +684,7 @@ class MainWindow(QMainWindow):
         self.txt_out = QPlainTextEdit()
         self.txt_out.setReadOnly(True)
         self.txt_out.setPlaceholderText("Status messages")
+        self.txt_out.setMaximumBlockCount(2000)
         self.txt_out.setMinimumHeight(220)
         log_layout.addWidget(self.txt_out)
         layout.addWidget(log_group, 2)
@@ -807,6 +813,7 @@ class MainWindow(QMainWindow):
 
         self.btn_prep_load_jpg.clicked.connect(self._on_prep_load_jpg)
         self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
+        self.btn_prep_skip_to_place.clicked.connect(lambda: self._set_workflow_page("place"))
         self.btn_prep_save_outputs.clicked.connect(self._on_prep_save_outputs)
         self.btn_prep_apply_to_control.clicked.connect(self._on_prep_apply_to_control)
         self.btn_prep_reset_defaults.clicked.connect(self._on_prep_reset_defaults)
@@ -1777,6 +1784,11 @@ class MainWindow(QMainWindow):
             return 0
         return bisect.bisect_left(line_command_indices, command_index)
 
+    def _update_resume_line_label(self) -> None:
+        max_line = max(0, len(self.job_state.lines) - 1)
+        current_line = max(0, min(self.slider_cmd_count.value(), max_line))
+        self.lbl_resume_line.setText(f"Line {current_line} / {max_line}")
+
     def _update_draw_session_progress(self, current_command_index: int, *, force_flush: bool = False) -> None:
         start_index = self.streamer.state.start_index
         lines_sent_total = self._count_lines_sent(current_command_index)
@@ -2293,6 +2305,7 @@ class MainWindow(QMainWindow):
         self.job_state.selected_line_index = value
         self.txt_cmd_start.setText(str(value))
         self.preview_canvas.set_selected_line(value)
+        self._update_resume_line_label()
 
     def _on_slider_from_text(self) -> None:
         value = self._parse_int(self.txt_cmd_start, "Line number")
@@ -2306,11 +2319,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No slice", "Slice the image first.")
             return
 
-        self.preview_canvas.set_bbox_overlay(bbox, visible=True)
-
         if not self.transport.is_connected:
-            self._show_toast("Bounding box shown in preview. Connect USB to trace it on the canvas.")
+            QMessageBox.information(self, "USB not connected", "Connect USB in Run before tracing the footprint.")
             return
+
+        self.preview_canvas.set_bbox_overlay(bbox, visible=True)
         within_bounds, error = self._validate_bbox_within_bounds()
         if not within_bounds:
             QMessageBox.warning(self, "Bounds check failed", error or "Bounding box is out of bounds.")
@@ -2332,6 +2345,9 @@ class MainWindow(QMainWindow):
         bbox = self.job_state.bounding_box
         if bbox is None:
             QMessageBox.information(self, "No slice", "Slice the image first.")
+            return
+        if not self.transport.is_connected:
+            QMessageBox.information(self, "USB not connected", "Connect USB in Run before moving to footprint points.")
             return
 
         target_x = bbox.min_x + ((bbox.max_x - bbox.min_x) * x_ratio)
@@ -2534,6 +2550,7 @@ class MainWindow(QMainWindow):
         prep_controls_enabled = not interaction_locked
         self.btn_prep_load_jpg.setEnabled(prep_controls_enabled)
         self.btn_prep_load_sidecar.setEnabled(prep_controls_enabled)
+        self.btn_prep_skip_to_place.setEnabled(prep_controls_enabled)
         self.btn_prep_save_outputs.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
         self.btn_prep_reset_defaults.setEnabled(prep_controls_enabled)
@@ -2567,6 +2584,7 @@ class MainWindow(QMainWindow):
         self.slider_cmd_count.setEnabled(sliced_controls)
         self.btn_slider_dec.setEnabled(sliced_controls)
         self.btn_slider_inc.setEnabled(sliced_controls)
+        self._update_resume_line_label()
 
         connected_controls = usb_connected and not self._manual_busy and (not stream_active or stream_paused)
         self.txt_serial_cmd.setEnabled(connected_controls)
@@ -2581,14 +2599,14 @@ class MainWindow(QMainWindow):
         for button in self.bbox_point_buttons.values():
             button.setEnabled(bbox_point_controls)
 
-        can_trace_bbox = is_sliced and not stream_active and not self._manual_busy
+        can_trace_bbox = is_sliced and usb_connected and not stream_active and not self._manual_busy
         can_draw = is_sliced and usb_connected
         if not is_sliced:
-            self.lbl_bbox_hint.setText("Slice image to enable footprint tools.")
+            self.lbl_bbox_hint.setText("Slice image, then connect USB to use footprint tools.")
         elif usb_connected:
             self.lbl_bbox_hint.setText("Trace the footprint or move to a bounding-box point on the canvas.")
         else:
-            self.lbl_bbox_hint.setText("Preview the footprint now, or connect USB to trace it on the canvas.")
+            self.lbl_bbox_hint.setText("Connect USB in Run to trace the footprint on the canvas.")
         self.btn_bounding_box.setEnabled(can_trace_bbox)
         self.checkbox_bounding_pen.setEnabled(can_trace_bbox)
         self.btn_send_img.setEnabled(can_draw and not stream_active and not self._manual_busy)
