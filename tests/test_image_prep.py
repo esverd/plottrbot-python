@@ -78,6 +78,7 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
 
     settings = ImagePrepSettings(
         dpi=47,
+        exposure_percent=25,
         blur_radius=1.3,
         levels=5,
         strategy="relative",
@@ -90,6 +91,7 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
                 center_y=0.75,
                 radius=0.18,
                 feather=0.02,
+                exposure_percent=35,
                 contrast_percent=180,
                 blur_radius=1.4,
             )
@@ -171,6 +173,7 @@ def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> Non
                 center_y=0.5,
                 radius=0.25,
                 feather=0.0,
+                exposure_percent=-35,
                 contrast_percent=350,
                 blur_radius=0.0,
             )
@@ -181,6 +184,7 @@ def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> Non
     sanitized, masked_artifacts = process_image_for_prep(image_path=image_path, settings=masked_settings)
 
     assert sanitized.local_masks[0].contrast_percent == 350
+    assert sanitized.local_masks[0].exposure_percent == -35
     base_tonal = base_artifacts.tonal_preview_image.convert("L")
     masked_tonal = masked_artifacts.tonal_preview_image.convert("L")
     center = (int(round(base_tonal.width * 0.4)), base_tonal.height // 2)
@@ -196,6 +200,7 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
 
     base_settings = ImagePrepSettings(
         dpi=35,
+        exposure_percent=45,
         contrast_percent=120,
         blur_radius=1.2,
         levels=4,
@@ -204,6 +209,7 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
     )
     masked_settings = ImagePrepSettings(
         dpi=35,
+        exposure_percent=45,
         contrast_percent=120,
         blur_radius=1.2,
         levels=4,
@@ -215,6 +221,7 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
                 center_y=0.5,
                 radius=0.3,
                 feather=0.08,
+                exposure_percent=45,
                 contrast_percent=120,
                 blur_radius=1.2,
             )
@@ -226,6 +233,22 @@ def test_local_mask_matching_global_settings_is_noop(tmp_path: Path) -> None:
 
     assert masked_artifacts.tonal_preview_image.tobytes() == base_artifacts.tonal_preview_image.tobytes()
     assert masked_artifacts.export_bmp_image.tobytes() == base_artifacts.export_bmp_image.tobytes()
+
+
+def test_global_exposure_adjusts_tonal_output(tmp_path: Path) -> None:
+    image_path = tmp_path / "exposure.jpg"
+    _create_gradient_jpg(image_path, width=64, height=64)
+
+    _, normal_artifacts = process_image_for_prep(image_path=image_path, settings=ImagePrepSettings())
+    sanitized, bright_artifacts = process_image_for_prep(
+        image_path=image_path,
+        settings=ImagePrepSettings(exposure_percent=80),
+    )
+
+    assert sanitized.exposure_percent == 80
+    normal_values = list(normal_artifacts.tonal_preview_image.convert("L").tobytes())
+    bright_values = list(bright_artifacts.tonal_preview_image.convert("L").tobytes())
+    assert sum(bright_values) > sum(normal_values)
 
 
 def test_dimensions_and_dpi_control_processed_resolution(tmp_path: Path) -> None:

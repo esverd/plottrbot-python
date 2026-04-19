@@ -835,6 +835,9 @@ def test_image_prep_apply_to_control_and_slice(qtbot, settings_store, tmp_path: 
     assert window.job_state.loaded_file is not None
     assert window.job_state.loaded_file.name == "prep.plottrbot.processed.bmp"
     assert window.job_state.dpi_override == 40
+    assert window.workflow_stack.currentWidget() is window.place_page
+    assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
+    assert window.preview_canvas._primary_image is not None
 
     window._on_slice_image()
     assert window.job_state.lines
@@ -1068,7 +1071,9 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
 
     window._set_workflow_page("prep")
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
-    window.btn_prep_skip_to_place.click()
+    assert not hasattr(window, "btn_prep_skip_to_place")
+    assert window.btn_prep_apply_to_control.text() == "Use in Place"
+    window._set_workflow_page("place")
     assert window.workflow_stack.currentWidget() is window.place_page
     window._set_workflow_page("prep")
 
@@ -1146,10 +1151,13 @@ def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp
         mark_dirty=True,
     )
 
+    window.slider_prep_exposure.setValue(45)
     window.slider_prep_contrast.setValue(120)
     window.slider_prep_blur.setValue(15)
-    qtbot.waitUntil(lambda: window.image_prep_state.settings.contrast_percent == 120, timeout=1500)
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.exposure_percent == 45, timeout=1500)
+    assert window.image_prep_state.settings.contrast_percent == 120
     assert window.image_prep_state.settings.blur_radius == pytest.approx(1.5, abs=0.01)
+    assert window.lbl_prep_exposure_value.text() == "+45"
     assert window.spin_prep_contrast.value() == 120
     assert window.spin_prep_blur.value() == pytest.approx(1.5, abs=0.01)
 
@@ -1187,10 +1195,11 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert window._selected_prep_mask_index == 0
     assert "Mask 1 of 1" in window.lbl_prep_mask_status.text()
 
-    window.spin_prep_mask_radius.setValue(35.0)
-    window.spin_prep_mask_feather.setValue(8.0)
-    window.spin_prep_mask_contrast.setValue(240)
-    window.spin_prep_mask_blur.setValue(1.7)
+    window.slider_prep_mask_radius.setValue(35)
+    window.slider_prep_mask_feather.setValue(8)
+    window.slider_prep_mask_exposure.setValue(-20)
+    window.slider_prep_mask_contrast.setValue(240)
+    window.slider_prep_mask_blur.setValue(17)
     qtbot.waitUntil(
         lambda: window.image_prep_state.settings.local_masks[0].contrast_percent == 240,
         timeout=1500,
@@ -1198,7 +1207,13 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     mask = window.image_prep_state.settings.local_masks[0]
     assert mask.radius == pytest.approx(0.35, abs=0.01)
     assert mask.feather == pytest.approx(0.08, abs=0.01)
+    assert mask.exposure_percent == -20
     assert mask.blur_radius == pytest.approx(1.7, abs=0.01)
+    assert window.lbl_prep_mask_radius_value.text() == "35%"
+    assert window.lbl_prep_mask_feather_value.text() == "8%"
+    assert window.lbl_prep_mask_exposure_value.text() == "-20"
+    assert window.lbl_prep_mask_contrast_value.text() == "+240"
+    assert window.lbl_prep_mask_blur_value.text() == "1.7"
 
     window._on_prep_mask_moved(0, 0.25, 0.75)
     qtbot.waitUntil(
@@ -1211,6 +1226,7 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert sidecar_path is not None
     _, loaded_settings, _ = read_sidecar(sidecar_path)
     assert len(loaded_settings.local_masks) == 1
+    assert loaded_settings.local_masks[0].exposure_percent == -20
     assert loaded_settings.local_masks[0].contrast_percent == 240
 
 
@@ -1253,6 +1269,7 @@ def test_image_prep_reset_defaults_restores_core_controls(qtbot, settings_store,
         mark_dirty=True,
     )
 
+    window.slider_prep_exposure.setValue(70)
     window.spin_prep_contrast.setValue(220)
     window.spin_prep_blur.setValue(3.4)
     window.spin_prep_levels.setValue(6)
@@ -1262,6 +1279,8 @@ def test_image_prep_reset_defaults_restores_core_controls(qtbot, settings_store,
     window._on_prep_reset_defaults()
 
     assert window.spin_prep_dpi.value() == 35
+    assert window.slider_prep_exposure.value() == 0
+    assert window.lbl_prep_exposure_value.text() == "0"
     assert window.spin_prep_contrast.value() == 0
     assert window.spin_prep_blur.value() == pytest.approx(0.0, abs=0.01)
     assert window.spin_prep_levels.value() == 4

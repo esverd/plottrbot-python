@@ -309,9 +309,7 @@ class MainWindow(QMainWindow):
         self.btn_prep_load_jpg = QPushButton("Open JPG/sidecar")
         self.btn_prep_load_sidecar = QPushButton("Load sidecar")
         self.btn_prep_load_sidecar.hide()
-        self.btn_prep_skip_to_place = QPushButton("Place BMP/job")
         source_buttons.addWidget(self.btn_prep_load_jpg)
-        source_buttons.addWidget(self.btn_prep_skip_to_place)
         source_layout.addLayout(source_buttons)
 
         self.lbl_prep_source = QLabel("Source: none")
@@ -359,7 +357,20 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(QLabel("Height [mm]"), 1, 2)
         controls_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
-        controls_layout.addWidget(QLabel("Contrast"), 2, 0)
+        controls_layout.addWidget(QLabel("Exposure"), 2, 0)
+        exposure_row = QHBoxLayout()
+        exposure_row.setContentsMargins(0, 0, 0, 0)
+        self.slider_prep_exposure = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_exposure.setRange(-100, 300)
+        self.slider_prep_exposure.setValue(0)
+        self.lbl_prep_exposure_value = QLabel("0")
+        self.lbl_prep_exposure_value.setMinimumWidth(48)
+        self.lbl_prep_exposure_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        exposure_row.addWidget(self.slider_prep_exposure, 1)
+        exposure_row.addWidget(self.lbl_prep_exposure_value)
+        controls_layout.addLayout(exposure_row, 2, 1, 1, 3)
+
+        controls_layout.addWidget(QLabel("Contrast"), 3, 0)
         contrast_row = QHBoxLayout()
         contrast_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_contrast = QSlider(Qt.Orientation.Horizontal)
@@ -373,9 +384,9 @@ class MainWindow(QMainWindow):
         self.spin_prep_contrast.setMinimumWidth(84)
         contrast_row.addWidget(self.slider_prep_contrast, 1)
         contrast_row.addWidget(self.spin_prep_contrast)
-        controls_layout.addLayout(contrast_row, 2, 1, 1, 3)
+        controls_layout.addLayout(contrast_row, 3, 1, 1, 3)
 
-        controls_layout.addWidget(QLabel("Blur"), 3, 0)
+        controls_layout.addWidget(QLabel("Blur"), 4, 0)
         blur_row = QHBoxLayout()
         blur_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_blur = QSlider(Qt.Orientation.Horizontal)
@@ -390,33 +401,33 @@ class MainWindow(QMainWindow):
         self.spin_prep_blur.setMinimumWidth(84)
         blur_row.addWidget(self.slider_prep_blur, 1)
         blur_row.addWidget(self.spin_prep_blur)
-        controls_layout.addLayout(blur_row, 3, 1, 1, 3)
+        controls_layout.addLayout(blur_row, 4, 1, 1, 3)
 
         self.spin_prep_levels = QSpinBox()
         self.spin_prep_levels.setRange(2, 8)
         self.spin_prep_levels.setValue(4)
-        controls_layout.addWidget(QLabel("Tone levels"), 4, 0)
-        controls_layout.addWidget(self.spin_prep_levels, 4, 1)
+        controls_layout.addWidget(QLabel("Tone levels"), 5, 0)
+        controls_layout.addWidget(self.spin_prep_levels, 5, 1)
 
         self.combo_prep_strategy = QComboBox()
         self.combo_prep_strategy.addItems(["banded", "relative"])
-        controls_layout.addWidget(QLabel("Threshold mode"), 4, 2)
-        controls_layout.addWidget(self.combo_prep_strategy, 4, 3)
+        controls_layout.addWidget(QLabel("Threshold mode"), 5, 2)
+        controls_layout.addWidget(self.combo_prep_strategy, 5, 3)
 
         self.checkbox_prep_lock_aspect = QCheckBox("Lock aspect ratio")
         self.checkbox_prep_lock_aspect.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 5, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 6, 0, 1, 2)
 
         self.checkbox_prep_auto_thresholds = QCheckBox("Use auto thresholds")
         self.checkbox_prep_auto_thresholds.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 5, 2, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 6, 2, 1, 2)
 
         self.checkbox_prep_halftone_preview = QCheckBox("Show halftone preview")
         self.checkbox_prep_halftone_preview.setChecked(False)
-        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 6, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 7, 0, 1, 2)
 
         self.lbl_prep_manual_thresholds = QLabel("Manual thresholds")
-        controls_layout.addWidget(self.lbl_prep_manual_thresholds, 7, 0)
+        controls_layout.addWidget(self.lbl_prep_manual_thresholds, 8, 0)
         self.prep_threshold_container = QWidget()
         threshold_layout = QVBoxLayout(self.prep_threshold_container)
         threshold_layout.setContentsMargins(0, 0, 0, 0)
@@ -441,11 +452,11 @@ class MainWindow(QMainWindow):
             self._prep_threshold_rows.append(row_widget)
             self._prep_threshold_sliders.append(slider)
             self._prep_threshold_spinboxes.append(spin)
-        controls_layout.addWidget(self.prep_threshold_container, 7, 1, 1, 3)
+        controls_layout.addWidget(self.prep_threshold_container, 8, 1, 1, 3)
 
         self.lbl_prep_effective_thresholds = QLabel("Effective thresholds: n/a")
         self.lbl_prep_effective_thresholds.setWordWrap(True)
-        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 8, 0, 1, 4)
+        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 9, 0, 1, 4)
         layout.addWidget(controls_group)
 
         mask_group = QGroupBox("Local adjustments")
@@ -465,34 +476,65 @@ class MainWindow(QMainWindow):
         self.lbl_prep_mask_status.setWordWrap(True)
         mask_layout.addWidget(self.lbl_prep_mask_status, 1, 0, 1, 4)
 
-        self.spin_prep_mask_radius = QDoubleSpinBox()
-        self.spin_prep_mask_radius.setRange(1.0, 100.0)
-        self.spin_prep_mask_radius.setSingleStep(1.0)
-        self.spin_prep_mask_radius.setDecimals(1)
-        self.spin_prep_mask_radius.setSuffix("%")
+        self.slider_prep_mask_radius = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_mask_radius.setRange(1, 100)
+        self.lbl_prep_mask_radius_value = QLabel("20%")
+        self.lbl_prep_mask_radius_value.setMinimumWidth(52)
+        self.lbl_prep_mask_radius_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         mask_layout.addWidget(QLabel("Radius"), 2, 0)
-        mask_layout.addWidget(self.spin_prep_mask_radius, 2, 1)
+        mask_radius_row = QHBoxLayout()
+        mask_radius_row.setContentsMargins(0, 0, 0, 0)
+        mask_radius_row.addWidget(self.slider_prep_mask_radius, 1)
+        mask_radius_row.addWidget(self.lbl_prep_mask_radius_value)
+        mask_layout.addLayout(mask_radius_row, 2, 1, 1, 3)
 
-        self.spin_prep_mask_feather = QDoubleSpinBox()
-        self.spin_prep_mask_feather.setRange(0.0, 50.0)
-        self.spin_prep_mask_feather.setSingleStep(1.0)
-        self.spin_prep_mask_feather.setDecimals(1)
-        self.spin_prep_mask_feather.setSuffix("%")
-        mask_layout.addWidget(QLabel("Feather"), 2, 2)
-        mask_layout.addWidget(self.spin_prep_mask_feather, 2, 3)
+        self.slider_prep_mask_feather = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_mask_feather.setRange(0, 50)
+        self.lbl_prep_mask_feather_value = QLabel("4%")
+        self.lbl_prep_mask_feather_value.setMinimumWidth(52)
+        self.lbl_prep_mask_feather_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        mask_layout.addWidget(QLabel("Feather"), 3, 0)
+        mask_feather_row = QHBoxLayout()
+        mask_feather_row.setContentsMargins(0, 0, 0, 0)
+        mask_feather_row.addWidget(self.slider_prep_mask_feather, 1)
+        mask_feather_row.addWidget(self.lbl_prep_mask_feather_value)
+        mask_layout.addLayout(mask_feather_row, 3, 1, 1, 3)
 
-        self.spin_prep_mask_contrast = QSpinBox()
-        self.spin_prep_mask_contrast.setRange(-100, 1000)
-        self.spin_prep_mask_contrast.setSingleStep(5)
-        mask_layout.addWidget(QLabel("Local contrast"), 3, 0)
-        mask_layout.addWidget(self.spin_prep_mask_contrast, 3, 1)
+        self.slider_prep_mask_exposure = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_mask_exposure.setRange(-100, 300)
+        self.lbl_prep_mask_exposure_value = QLabel("0")
+        self.lbl_prep_mask_exposure_value.setMinimumWidth(52)
+        self.lbl_prep_mask_exposure_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        mask_layout.addWidget(QLabel("Local exposure"), 4, 0)
+        mask_exposure_row = QHBoxLayout()
+        mask_exposure_row.setContentsMargins(0, 0, 0, 0)
+        mask_exposure_row.addWidget(self.slider_prep_mask_exposure, 1)
+        mask_exposure_row.addWidget(self.lbl_prep_mask_exposure_value)
+        mask_layout.addLayout(mask_exposure_row, 4, 1, 1, 3)
 
-        self.spin_prep_mask_blur = QDoubleSpinBox()
-        self.spin_prep_mask_blur.setRange(0.0, 10.0)
-        self.spin_prep_mask_blur.setSingleStep(0.1)
-        self.spin_prep_mask_blur.setDecimals(1)
-        mask_layout.addWidget(QLabel("Local blur"), 3, 2)
-        mask_layout.addWidget(self.spin_prep_mask_blur, 3, 3)
+        self.slider_prep_mask_contrast = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_mask_contrast.setRange(-100, 1000)
+        self.lbl_prep_mask_contrast_value = QLabel("0")
+        self.lbl_prep_mask_contrast_value.setMinimumWidth(52)
+        self.lbl_prep_mask_contrast_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        mask_layout.addWidget(QLabel("Local contrast"), 5, 0)
+        mask_contrast_row = QHBoxLayout()
+        mask_contrast_row.setContentsMargins(0, 0, 0, 0)
+        mask_contrast_row.addWidget(self.slider_prep_mask_contrast, 1)
+        mask_contrast_row.addWidget(self.lbl_prep_mask_contrast_value)
+        mask_layout.addLayout(mask_contrast_row, 5, 1, 1, 3)
+
+        self.slider_prep_mask_blur = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_mask_blur.setRange(0, 100)
+        self.lbl_prep_mask_blur_value = QLabel("0.0")
+        self.lbl_prep_mask_blur_value.setMinimumWidth(52)
+        self.lbl_prep_mask_blur_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        mask_layout.addWidget(QLabel("Local blur"), 6, 0)
+        mask_blur_row = QHBoxLayout()
+        mask_blur_row.setContentsMargins(0, 0, 0, 0)
+        mask_blur_row.addWidget(self.slider_prep_mask_blur, 1)
+        mask_blur_row.addWidget(self.lbl_prep_mask_blur_value)
+        mask_layout.addLayout(mask_blur_row, 6, 1, 1, 3)
         layout.addWidget(mask_group)
 
         action_row = QHBoxLayout()
@@ -865,13 +907,13 @@ class MainWindow(QMainWindow):
 
         self.btn_prep_load_jpg.clicked.connect(self._on_prep_open_source)
         self.btn_prep_load_sidecar.clicked.connect(self._on_prep_load_sidecar)
-        self.btn_prep_skip_to_place.clicked.connect(lambda: self._set_workflow_page("place"))
         self.btn_prep_save_outputs.clicked.connect(self._on_prep_save_outputs)
         self.btn_prep_apply_to_control.clicked.connect(self._on_prep_apply_to_control)
         self.btn_prep_reset_defaults.clicked.connect(self._on_prep_reset_defaults)
         self.spin_prep_dpi.valueChanged.connect(self._on_prep_settings_changed)
         self.spin_prep_width_mm.valueChanged.connect(self._on_prep_dimension_changed)
         self.spin_prep_height_mm.valueChanged.connect(self._on_prep_dimension_changed)
+        self.slider_prep_exposure.valueChanged.connect(self._on_prep_exposure_slider_changed)
         self.slider_prep_contrast.valueChanged.connect(self._on_prep_contrast_slider_changed)
         self.slider_prep_contrast.sliderReleased.connect(self._flush_prep_recompute)
         self.spin_prep_contrast.valueChanged.connect(self._on_prep_contrast_spin_changed)
@@ -894,10 +936,11 @@ class MainWindow(QMainWindow):
         self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
         self.btn_prep_add_mask.clicked.connect(self._on_prep_add_mask)
         self.btn_prep_remove_mask.clicked.connect(self._on_prep_remove_mask)
-        self.spin_prep_mask_radius.valueChanged.connect(self._on_prep_mask_controls_changed)
-        self.spin_prep_mask_feather.valueChanged.connect(self._on_prep_mask_controls_changed)
-        self.spin_prep_mask_contrast.valueChanged.connect(self._on_prep_mask_controls_changed)
-        self.spin_prep_mask_blur.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.slider_prep_mask_radius.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.slider_prep_mask_feather.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.slider_prep_mask_exposure.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.slider_prep_mask_contrast.valueChanged.connect(self._on_prep_mask_controls_changed)
+        self.slider_prep_mask_blur.valueChanged.connect(self._on_prep_mask_controls_changed)
         self.prep_preview_label.maskSelected.connect(self._on_prep_mask_selected)
         self.prep_preview_label.maskMoved.connect(self._on_prep_mask_moved)
 
@@ -1177,6 +1220,8 @@ class MainWindow(QMainWindow):
         height_mm = settings.target_height_mm if settings.target_height_mm > 0.0 else 400.0
         self.spin_prep_width_mm.setValue(width_mm)
         self.spin_prep_height_mm.setValue(height_mm)
+        self.slider_prep_exposure.setValue(settings.exposure_percent)
+        self._update_signed_value_label(self.lbl_prep_exposure_value, settings.exposure_percent)
         self.spin_prep_contrast.setValue(settings.contrast_percent)
         self.slider_prep_contrast.setValue(
             max(self.slider_prep_contrast.minimum(), min(self.slider_prep_contrast.maximum(), settings.contrast_percent))
@@ -1209,6 +1254,7 @@ class MainWindow(QMainWindow):
             dpi=self.spin_prep_dpi.value(),
             target_width_mm=self.spin_prep_width_mm.value(),
             target_height_mm=self.spin_prep_height_mm.value(),
+            exposure_percent=self.slider_prep_exposure.value(),
             contrast_percent=self.spin_prep_contrast.value(),
             blur_radius=float(self.spin_prep_blur.value()),
             levels=levels,
@@ -1237,19 +1283,40 @@ class MainWindow(QMainWindow):
         self._prep_mask_controls_syncing = True
         if selected is None:
             self.lbl_prep_mask_status.setText("No local mask selected.")
-            self.spin_prep_mask_radius.setValue(20.0)
-            self.spin_prep_mask_feather.setValue(4.0)
-            self.spin_prep_mask_contrast.setValue(0)
-            self.spin_prep_mask_blur.setValue(0.0)
+            settings = self.image_prep_state.settings.sanitized()
+            self.slider_prep_mask_radius.setValue(20)
+            self.slider_prep_mask_feather.setValue(4)
+            self.slider_prep_mask_exposure.setValue(settings.exposure_percent)
+            self.slider_prep_mask_contrast.setValue(settings.contrast_percent)
+            self.slider_prep_mask_blur.setValue(int(round(settings.blur_radius * 10.0)))
         else:
             self.lbl_prep_mask_status.setText(
                 f"Mask {self._selected_prep_mask_index + 1} of {len(masks)}. Drag the circle in the preview."
             )
-            self.spin_prep_mask_radius.setValue(selected.radius * 100.0)
-            self.spin_prep_mask_feather.setValue(selected.feather * 100.0)
-            self.spin_prep_mask_contrast.setValue(selected.contrast_percent)
-            self.spin_prep_mask_blur.setValue(selected.blur_radius)
+            self.slider_prep_mask_radius.setValue(int(round(selected.radius * 100.0)))
+            self.slider_prep_mask_feather.setValue(int(round(selected.feather * 100.0)))
+            self.slider_prep_mask_exposure.setValue(selected.exposure_percent)
+            self.slider_prep_mask_contrast.setValue(selected.contrast_percent)
+            self.slider_prep_mask_blur.setValue(int(round(selected.blur_radius * 10.0)))
+        self._update_prep_mask_value_labels()
         self._prep_mask_controls_syncing = False
+
+    def _update_signed_value_label(self, label: QLabel, value: int) -> None:
+        prefix = "+" if value > 0 else ""
+        label.setText(f"{prefix}{int(value)}")
+
+    def _update_prep_mask_value_labels(self) -> None:
+        self.lbl_prep_mask_radius_value.setText(f"{self.slider_prep_mask_radius.value()}%")
+        self.lbl_prep_mask_feather_value.setText(f"{self.slider_prep_mask_feather.value()}%")
+        self._update_signed_value_label(
+            self.lbl_prep_mask_exposure_value,
+            self.slider_prep_mask_exposure.value(),
+        )
+        self._update_signed_value_label(
+            self.lbl_prep_mask_contrast_value,
+            self.slider_prep_mask_contrast.value(),
+        )
+        self.lbl_prep_mask_blur_value.setText(f"{self.slider_prep_mask_blur.value() / 10.0:.1f}")
 
     def _set_manual_threshold_controls_visible(self, visible: bool) -> None:
         self.lbl_prep_manual_thresholds.setVisible(visible)
@@ -1633,6 +1700,7 @@ class MainWindow(QMainWindow):
         source = self.image_prep_state.source_image_path
         default_settings = ImagePrepSettings(
             dpi=self.DEFAULT_BMP_DPI,
+            exposure_percent=0,
             contrast_percent=0,
             blur_radius=0.0,
             levels=4,
@@ -1735,6 +1803,12 @@ class MainWindow(QMainWindow):
         if self._prep_recompute_timer.isActive():
             self._prep_recompute_timer.stop()
         self._on_prep_settings_changed()
+
+    def _on_prep_exposure_slider_changed(self, value: int) -> None:
+        self._update_signed_value_label(self.lbl_prep_exposure_value, int(value))
+        if self._prep_updating_controls or self._prep_slider_syncing:
+            return
+        self._schedule_prep_recompute(delay_ms=60)
 
     def _on_prep_contrast_slider_changed(self, value: int) -> None:
         if self._prep_updating_controls:
@@ -1853,6 +1927,7 @@ class MainWindow(QMainWindow):
                 center_y=0.5,
                 radius=0.2,
                 feather=0.04,
+                exposure_percent=settings.exposure_percent,
                 contrast_percent=settings.contrast_percent,
                 blur_radius=settings.blur_radius,
             ).sanitized()
@@ -1897,6 +1972,7 @@ class MainWindow(QMainWindow):
         self._schedule_prep_recompute(delay_ms=160)
 
     def _on_prep_mask_controls_changed(self, *_args: object) -> None:
+        self._update_prep_mask_value_labels()
         if self._prep_mask_controls_syncing or self._prep_updating_controls:
             return
         masks = list(self.image_prep_state.settings.local_masks)
@@ -1904,10 +1980,11 @@ class MainWindow(QMainWindow):
             return
         masks[self._selected_prep_mask_index] = replace(
             masks[self._selected_prep_mask_index],
-            radius=float(self.spin_prep_mask_radius.value()) / 100.0,
-            feather=float(self.spin_prep_mask_feather.value()) / 100.0,
-            contrast_percent=int(self.spin_prep_mask_contrast.value()),
-            blur_radius=float(self.spin_prep_mask_blur.value()),
+            radius=float(self.slider_prep_mask_radius.value()) / 100.0,
+            feather=float(self.slider_prep_mask_feather.value()) / 100.0,
+            exposure_percent=int(self.slider_prep_mask_exposure.value()),
+            contrast_percent=int(self.slider_prep_mask_contrast.value()),
+            blur_radius=float(self.slider_prep_mask_blur.value()) / 10.0,
         ).sanitized()
         self.image_prep_state.settings.local_masks = masks
         self.prep_preview_label.set_masks(masks, self._selected_prep_mask_index)
@@ -2797,20 +2874,21 @@ class MainWindow(QMainWindow):
         prep_controls_enabled = not interaction_locked
         self.btn_prep_load_jpg.setEnabled(prep_controls_enabled)
         self.btn_prep_load_sidecar.setEnabled(prep_controls_enabled)
-        self.btn_prep_skip_to_place.setEnabled(prep_controls_enabled)
         self.btn_prep_save_outputs.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
         self.btn_prep_reset_defaults.setEnabled(prep_controls_enabled)
         self.btn_prep_add_mask.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_remove_mask.setEnabled(prep_has_selected_mask and prep_controls_enabled)
-        self.spin_prep_mask_radius.setEnabled(prep_has_selected_mask and prep_controls_enabled)
-        self.spin_prep_mask_feather.setEnabled(prep_has_selected_mask and prep_controls_enabled)
-        self.spin_prep_mask_contrast.setEnabled(prep_has_selected_mask and prep_controls_enabled)
-        self.spin_prep_mask_blur.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.slider_prep_mask_radius.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.slider_prep_mask_feather.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.slider_prep_mask_exposure.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.slider_prep_mask_contrast.setEnabled(prep_has_selected_mask and prep_controls_enabled)
+        self.slider_prep_mask_blur.setEnabled(prep_has_selected_mask and prep_controls_enabled)
         self.spin_prep_dpi.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_width_mm.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_height_mm.setEnabled(prep_has_source and prep_controls_enabled)
         self.checkbox_prep_lock_aspect.setEnabled(prep_has_source and prep_controls_enabled)
+        self.slider_prep_exposure.setEnabled(prep_has_source and prep_controls_enabled)
         self.slider_prep_contrast.setEnabled(prep_has_source and prep_controls_enabled)
         self.spin_prep_contrast.setEnabled(prep_has_source and prep_controls_enabled)
         self.slider_prep_blur.setEnabled(prep_has_source and prep_controls_enabled)

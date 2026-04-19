@@ -53,12 +53,13 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 - Use the `Prep` workflow to open a JPG/JPEG or an existing sidecar and adjust:
   - DPI
   - target width/height in mm
+  - exposure
   - Gaussian blur
   - tonal levels (`2-8`)
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
 - Preview can toggle between tonal and halftone views.
-- `Local adjustments` can add circular masks that override contrast and blur in selected image regions. Drag a mask in the prep preview to reposition it.
+- `Local adjustments` can add circular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune the mask with sliders.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
   - `<image-stem>.plottrbot-edit.json`

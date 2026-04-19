@@ -20,6 +20,8 @@ MAX_RENDER_SIDE_PX = 12000
 MAX_RENDER_PIXELS = 36_000_000
 MIN_CONTRAST_PERCENT = -100
 MAX_CONTRAST_PERCENT = 1000
+MIN_EXPOSURE_PERCENT = -100
+MAX_EXPOSURE_PERCENT = 300
 
 
 def _utc_now_iso() -> str:
@@ -157,6 +159,7 @@ class ImagePrepMask:
     center_y: float = 0.5
     radius: float = 0.2
     feather: float = 0.04
+    exposure_percent: int = 0
     contrast_percent: int = 0
     blur_radius: float = 0.0
 
@@ -166,6 +169,11 @@ class ImagePrepMask:
             center_y=_clamp_float(self.center_y, 0.0, 1.0),
             radius=_clamp_float(self.radius, 0.01, 1.0),
             feather=_clamp_float(self.feather, 0.0, 0.5),
+            exposure_percent=_clamp(
+                int(round(self.exposure_percent)),
+                MIN_EXPOSURE_PERCENT,
+                MAX_EXPOSURE_PERCENT,
+            ),
             contrast_percent=_clamp(
                 int(round(self.contrast_percent)),
                 MIN_CONTRAST_PERCENT,
@@ -180,6 +188,7 @@ class ImagePrepMask:
             "center_y": float(self.center_y),
             "radius": float(self.radius),
             "feather": float(self.feather),
+            "exposure_percent": int(self.exposure_percent),
             "contrast_percent": int(self.contrast_percent),
             "blur_radius": float(self.blur_radius),
         }
@@ -191,6 +200,7 @@ class ImagePrepMask:
             center_y=_coerce_float(payload.get("center_y"), 0.5),
             radius=_coerce_float(payload.get("radius"), 0.2),
             feather=_coerce_float(payload.get("feather"), 0.04),
+            exposure_percent=_coerce_int(payload.get("exposure_percent"), 0),
             contrast_percent=_coerce_int(payload.get("contrast_percent"), 0),
             blur_radius=_coerce_float(payload.get("blur_radius"), 0.0),
         ).sanitized()
@@ -201,6 +211,7 @@ class ImagePrepSettings:
     dpi: int = 35
     target_width_mm: float = 0.0
     target_height_mm: float = 0.0
+    exposure_percent: int = 0
     contrast_percent: int = 0
     blur_radius: float = 0.0
     levels: int = 4
@@ -217,6 +228,11 @@ class ImagePrepSettings:
         dpi = max(1, int(round(self.dpi)))
         target_width_mm = max(0.0, float(self.target_width_mm))
         target_height_mm = max(0.0, float(self.target_height_mm))
+        exposure_percent = _clamp(
+            int(round(self.exposure_percent)),
+            MIN_EXPOSURE_PERCENT,
+            MAX_EXPOSURE_PERCENT,
+        )
         contrast_percent = _clamp(int(round(self.contrast_percent)), MIN_CONTRAST_PERCENT, MAX_CONTRAST_PERCENT)
         blur_radius = max(0.0, float(self.blur_radius))
         auto_thresholds = bool(self.auto_thresholds)
@@ -226,6 +242,7 @@ class ImagePrepSettings:
             dpi=dpi,
             target_width_mm=target_width_mm,
             target_height_mm=target_height_mm,
+            exposure_percent=exposure_percent,
             contrast_percent=contrast_percent,
             blur_radius=blur_radius,
             levels=levels,
@@ -247,6 +264,7 @@ class ImagePrepSettings:
             "dpi": int(self.dpi),
             "target_width_mm": float(self.target_width_mm),
             "target_height_mm": float(self.target_height_mm),
+            "exposure_percent": int(self.exposure_percent),
             "contrast_percent": int(self.contrast_percent),
             "blur_radius": float(self.blur_radius),
             "levels": int(self.levels),
@@ -272,6 +290,11 @@ class ImagePrepSettings:
             dpi=max(1, _coerce_int(payload.get("dpi"), 35)),
             target_width_mm=max(0.0, _coerce_float(payload.get("target_width_mm"), 0.0)),
             target_height_mm=max(0.0, _coerce_float(payload.get("target_height_mm"), 0.0)),
+            exposure_percent=_clamp(
+                _coerce_int(payload.get("exposure_percent"), 0),
+                MIN_EXPOSURE_PERCENT,
+                MAX_EXPOSURE_PERCENT,
+            ),
             contrast_percent=_clamp(
                 _coerce_int(payload.get("contrast_percent"), 0),
                 MIN_CONTRAST_PERCENT,
@@ -395,8 +418,17 @@ def _circle_mask_image(
     return mask
 
 
-def _adjust_grayscale(image: Image.Image, *, contrast_percent: int, blur_radius: float) -> Image.Image:
+def _adjust_grayscale(
+    image: Image.Image,
+    *,
+    exposure_percent: int,
+    contrast_percent: int,
+    blur_radius: float,
+) -> Image.Image:
     adjusted = image
+    if exposure_percent != 0:
+        exposure_factor = max(0.0, 1.0 + (exposure_percent / 100.0))
+        adjusted = ImageEnhance.Brightness(adjusted).enhance(exposure_factor)
     if contrast_percent != 0:
         contrast_factor = max(0.0, 1.0 + (contrast_percent / 100.0))
         adjusted = ImageEnhance.Contrast(adjusted).enhance(contrast_factor)
@@ -410,6 +442,7 @@ def _apply_local_masks(
     base_image: Image.Image,
     source_image: Image.Image,
     masks: list[ImagePrepMask],
+    global_exposure_percent: int,
     global_contrast_percent: int,
     global_blur_radius: float,
 ) -> Image.Image:
@@ -419,6 +452,8 @@ def _apply_local_masks(
     for prep_mask in masks:
         mask = prep_mask.sanitized()
         if (
+            mask.exposure_percent == global_exposure_percent
+            and
             mask.contrast_percent == global_contrast_percent
             and abs(mask.blur_radius - global_blur_radius) < 0.001
         ):
@@ -426,6 +461,7 @@ def _apply_local_masks(
         else:
             local_adjusted = _adjust_grayscale(
                 source_image,
+                exposure_percent=mask.exposure_percent,
                 contrast_percent=mask.contrast_percent,
                 blur_radius=mask.blur_radius,
             )
@@ -451,6 +487,7 @@ def process_image_for_prep(
         raw_grayscale = source.convert("L")
         grayscale = _adjust_grayscale(
             raw_grayscale,
+            exposure_percent=sanitized.exposure_percent,
             contrast_percent=sanitized.contrast_percent,
             blur_radius=sanitized.blur_radius,
         )
@@ -482,6 +519,7 @@ def process_image_for_prep(
             base_image=grayscale,
             source_image=raw_grayscale,
             masks=sanitized.local_masks,
+            global_exposure_percent=sanitized.exposure_percent,
             global_contrast_percent=sanitized.contrast_percent,
             global_blur_radius=sanitized.blur_radius,
         )
