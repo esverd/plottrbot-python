@@ -1189,10 +1189,13 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
         mark_dirty=True,
     )
     window._update_ui_state()
+    assert window.prep_mask_settings_panel.isHidden() is True
+    assert "Add a mask" in window.lbl_prep_mask_status.text()
 
     qtbot.mouseClick(window.btn_prep_add_mask, Qt.MouseButton.LeftButton)
     assert len(window.image_prep_state.settings.local_masks) == 1
     assert window._selected_prep_mask_index == 0
+    assert window.prep_mask_settings_panel.isHidden() is False
     assert "Mask 1 of 1" in window.lbl_prep_mask_status.text()
 
     window.slider_prep_mask_radius.setValue(35)
@@ -1228,6 +1231,10 @@ def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     assert len(loaded_settings.local_masks) == 1
     assert loaded_settings.local_masks[0].exposure_percent == -20
     assert loaded_settings.local_masks[0].contrast_percent == 240
+
+    qtbot.mouseClick(window.btn_prep_remove_mask, Qt.MouseButton.LeftButton)
+    assert window.prep_mask_settings_panel.isHidden() is True
+    assert "Add a mask" in window.lbl_prep_mask_status.text()
 
 
 def test_image_prep_manual_contrast_above_slider_max(qtbot, settings_store, tmp_path: Path) -> None:
