@@ -170,6 +170,7 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
 
     assert window.btn_slice_img.isEnabled() is False
     assert window.slider_cmd_count.isEnabled() is False
+    assert window.lbl_run_state.text() == "No job image"
 
     bmp_path = tmp_path / "img.bmp"
     _create_simple_bmp(bmp_path)
@@ -178,15 +179,19 @@ def test_main_window_enablement_flow(qtbot, settings_store, tmp_path: Path) -> N
 
     assert window.btn_slice_img.isEnabled() is True
     assert window.slider_cmd_count.isEnabled() is False
+    assert window.lbl_run_state.text() == "Slice needed"
 
     window._on_slice_image()
     assert window.slider_cmd_count.isEnabled() is True
     assert window.btn_send_img.isEnabled() is False
+    assert window.lbl_bbox_hint.text() == "Preview the footprint now, or connect USB to trace it on the canvas."
+    assert window.lbl_run_state.text() == "Ready to connect"
 
     transport.connected = True
     window._update_ui_state()
     assert window.btn_send_img.isEnabled() is True
     assert window.btn_bounding_box.isEnabled() is True
+    assert window.lbl_run_state.text() == "Ready to send"
 
 
 def test_slider_and_hold_release_behavior(qtbot, settings_store, tmp_path: Path) -> None:
@@ -868,6 +873,9 @@ def test_image_prep_sidecar_load_restores_settings(qtbot, settings_store, tmp_pa
     assert window.spin_prep_levels.value() == 5
     assert window.combo_prep_strategy.currentText() == "relative"
     assert window.prep_preview_label.pixmap() is not None
+    assert window.lbl_prep_source.text() == "Source: restore.jpg"
+    assert window.lbl_prep_source.toolTip()
+    assert "Folder:" in window.lbl_prep_folder.text()
 
 
 def test_halftone_preview_toggle_does_not_change_export_bmp(qtbot, settings_store, tmp_path: Path) -> None:
@@ -1002,10 +1010,16 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
     assert window.workflow_stack.currentWidget() is window.prep_page
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
     assert window.workflow_buttons["prep"].isChecked() is True
+    assert window.lbl_bbox_hint.text() == "Slice image to enable footprint tools."
+    assert window.lbl_run_state.text() == "No job image"
 
     window._set_workflow_page("place")
     assert window.right_preview_stack.currentWidget() is window.machine_preview_panel
     assert window.workflow_buttons["place"].isChecked() is True
+    window.statusBar().showMessage("stale status")
+    window._set_workflow_page("advanced")
+    assert window.statusBar().currentMessage() == ""
+    assert window.txt_out.minimumHeight() >= 220
 
     window._set_workflow_page("prep")
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel

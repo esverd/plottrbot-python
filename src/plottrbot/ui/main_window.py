@@ -296,7 +296,14 @@ class MainWindow(QMainWindow):
 
         self.lbl_prep_source = QLabel("Source: none")
         self.lbl_prep_source.setWordWrap(True)
+        self.lbl_prep_source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         source_layout.addWidget(self.lbl_prep_source)
+
+        self.lbl_prep_folder = QLabel("Folder: n/a")
+        self.lbl_prep_folder.setWordWrap(True)
+        self.lbl_prep_folder.setObjectName("secondaryInfo")
+        self.lbl_prep_folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        source_layout.addWidget(self.lbl_prep_folder)
 
         self.lbl_prep_dimensions = QLabel("Image size: n/a")
         self.lbl_prep_dimensions.setWordWrap(True)
@@ -475,6 +482,9 @@ class MainWindow(QMainWindow):
 
         footprint_group = QGroupBox("Canvas footprint")
         footprint_layout = QVBoxLayout(footprint_group)
+        self.lbl_bbox_hint = QLabel("Slice image to enable footprint tools.")
+        self.lbl_bbox_hint.setObjectName("secondaryInfo")
+        self.lbl_bbox_hint.setWordWrap(True)
         self.btn_bounding_box = QPushButton("Trace bounding box")
         self.checkbox_bounding_pen = QCheckBox("Use pen when tracing bounding box")
 
@@ -496,8 +506,8 @@ class MainWindow(QMainWindow):
             for col_index, (point_label, _x_ratio, _y_ratio) in enumerate(row):
                 button = QPushButton("")
                 button.setObjectName("bboxPointButton")
-                button.setFixedSize(24, 24)
-                button.setToolTip(point_label.title())
+                button.setFixedSize(36, 36)
+                button.setToolTip(f"Move to {point_label.title()} of bounding box")
                 button.setAccessibleName(f"Bounding box point {point_label}")
                 self.bbox_point_buttons[point_label] = button
                 bbox_points_layout.addWidget(button, row_index, col_index)
@@ -510,7 +520,7 @@ class MainWindow(QMainWindow):
             }
             QPushButton#bboxPointButton {
                 border: 1px solid #b8bec8;
-                border-radius: 5px;
+                border-radius: 4px;
                 background: #f7f9fc;
                 padding: 0px;
             }
@@ -528,6 +538,7 @@ class MainWindow(QMainWindow):
             }
             """
         )
+        footprint_layout.addWidget(self.lbl_bbox_hint)
         footprint_layout.addWidget(self.btn_bounding_box)
         footprint_layout.addWidget(self.checkbox_bounding_pen)
         footprint_layout.addWidget(self.bbox_points_panel)
@@ -571,6 +582,9 @@ class MainWindow(QMainWindow):
 
         run_group = QGroupBox("Run job")
         run_layout = QVBoxLayout(run_group)
+        self.lbl_run_state = QLabel("Slice needed")
+        self.lbl_run_state.setObjectName("runStatePill")
+        self.lbl_run_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.checkbox_stop_recovery = QCheckBox("On stop: lift tool and home")
         self.checkbox_stop_recovery.setChecked(True)
 
@@ -595,6 +609,7 @@ class MainWindow(QMainWindow):
         self.btn_send_img = QPushButton("Send image to robot")
         self.btn_send_img.setProperty("role", "primary")
         self.btn_stop_drawing.setProperty("role", "danger")
+        run_layout.addWidget(self.lbl_run_state)
         run_layout.addWidget(self.checkbox_stop_recovery)
         run_layout.addLayout(cmd_row)
         run_layout.addLayout(slider_row)
@@ -651,9 +666,9 @@ class MainWindow(QMainWindow):
         self.txt_out = QPlainTextEdit()
         self.txt_out.setReadOnly(True)
         self.txt_out.setPlaceholderText("Status messages")
+        self.txt_out.setMinimumHeight(220)
         log_layout.addWidget(self.txt_out)
-        layout.addWidget(log_group, 1)
-        layout.addStretch(1)
+        layout.addWidget(log_group, 2)
 
     def _apply_operator_style(self) -> None:
         self.setStyleSheet(
@@ -709,6 +724,35 @@ class MainWindow(QMainWindow):
             QLabel#previewStatus {
                 color: #52606d;
                 font-size: 11px;
+            }
+            QLabel#secondaryInfo {
+                color: #52606d;
+                font-size: 11px;
+            }
+            QLabel#runStatePill {
+                border-radius: 5px;
+                padding: 6px 10px;
+                font-weight: 600;
+            }
+            QLabel#runStatePill[state="blocked"] {
+                background: #f2f4f7;
+                border: 1px solid #d5dce4;
+                color: #596574;
+            }
+            QLabel#runStatePill[state="ready"] {
+                background: #e6f3ec;
+                border: 1px solid #abd6bd;
+                color: #1f6f43;
+            }
+            QLabel#runStatePill[state="running"] {
+                background: #e7f0fb;
+                border: 1px solid #9fc4e8;
+                color: #155d91;
+            }
+            QLabel#runStatePill[state="paused"] {
+                background: #fff4d8;
+                border: 1px solid #e5c66f;
+                color: #7a5600;
             }
             QPushButton[role="primary"] {
                 background: #0f6da8;
@@ -842,6 +886,12 @@ class MainWindow(QMainWindow):
     def _show_toast(self, message: str, timeout_ms: int = 2200) -> None:
         self.statusBar().showMessage(message, timeout_ms)
 
+    def _compact_path(self, path: Path, *, max_chars: int = 72) -> str:
+        text = str(path)
+        if len(text) <= max_chars:
+            return text
+        return f"...{text[-(max_chars - 3):]}"
+
     def _machine_prep_limits(self) -> tuple[float, float]:
         max_width = float(max(1, int(self.settings.machine_profile.canvas_width_mm)))
         max_height = float(max(1, int(self.settings.machine_profile.canvas_height_mm)))
@@ -949,6 +999,8 @@ class MainWindow(QMainWindow):
         page = self.workflow_pages.get(key)
         if page is None:
             return
+        if self.workflow_stack.currentWidget() is not page:
+            self.statusBar().clearMessage()
         self.workflow_stack.setCurrentWidget(page)
         self.workflow_buttons[key].setChecked(True)
         self._sync_preview_panel()
@@ -1117,10 +1169,16 @@ class MainWindow(QMainWindow):
         source = self.image_prep_state.source_image_path
         if source is None:
             self.lbl_prep_source.setText("Source: none")
+            self.lbl_prep_source.setToolTip("")
+            self.lbl_prep_folder.setText("Folder: n/a")
+            self.lbl_prep_folder.setToolTip("")
             self.lbl_prep_dimensions.setText("Image size: n/a")
             self.lbl_prep_effective_thresholds.setText("Effective thresholds: n/a")
             return
-        self.lbl_prep_source.setText(f"Source: {source}")
+        self.lbl_prep_source.setText(f"Source: {source.name}")
+        self.lbl_prep_source.setToolTip(str(source))
+        self.lbl_prep_folder.setText(f"Folder: {self._compact_path(source.parent)}")
+        self.lbl_prep_folder.setToolTip(str(source.parent))
         artifacts = self.image_prep_state.artifacts
         if artifacts is None:
             self.lbl_prep_dimensions.setText("Image size: n/a")
@@ -2392,6 +2450,37 @@ class MainWindow(QMainWindow):
             if line_index >= 0:
                 self.slider_cmd_count.setValue(line_index)
 
+    def _set_run_state_indicator(self, text: str, state: str) -> None:
+        self.lbl_run_state.setText(text)
+        self.lbl_run_state.setProperty("state", state)
+        self.lbl_run_state.style().unpolish(self.lbl_run_state)
+        self.lbl_run_state.style().polish(self.lbl_run_state)
+
+    def _update_run_state_indicator(
+        self,
+        *,
+        has_image: bool,
+        is_sliced: bool,
+        usb_connected: bool,
+        stream_status: SendStatus,
+    ) -> None:
+        if stream_status == SendStatus.RUNNING:
+            self._set_run_state_indicator("Streaming", "running")
+            return
+        if stream_status == SendStatus.PAUSED:
+            self._set_run_state_indicator("Paused", "paused")
+            return
+        if not has_image:
+            self._set_run_state_indicator("No job image", "blocked")
+            return
+        if not is_sliced:
+            self._set_run_state_indicator("Slice needed", "blocked")
+            return
+        if not usb_connected:
+            self._set_run_state_indicator("Ready to connect", "blocked")
+            return
+        self._set_run_state_indicator("Ready to send", "ready")
+
     def _update_ui_state(self) -> None:
         has_image = self.job_state.loaded_file is not None
         is_sliced = bool(self.job_state.lines)
@@ -2408,6 +2497,12 @@ class MainWindow(QMainWindow):
             is_sliced=is_sliced,
             usb_connected=usb_connected,
             is_drawing=self._is_drawing,
+        )
+        self._update_run_state_indicator(
+            has_image=has_image,
+            is_sliced=is_sliced,
+            usb_connected=usb_connected,
+            stream_status=stream_status,
         )
 
         self.btn_connect.setText("Disconnect" if usb_connected else "Connect USB")
@@ -2475,7 +2570,14 @@ class MainWindow(QMainWindow):
 
         can_trace_bbox = is_sliced and not stream_active and not self._manual_busy
         can_draw = is_sliced and usb_connected
+        if not is_sliced:
+            self.lbl_bbox_hint.setText("Slice image to enable footprint tools.")
+        elif usb_connected:
+            self.lbl_bbox_hint.setText("Trace the footprint or move to a bounding-box point on the canvas.")
+        else:
+            self.lbl_bbox_hint.setText("Preview the footprint now, or connect USB to trace it on the canvas.")
         self.btn_bounding_box.setEnabled(can_trace_bbox)
+        self.checkbox_bounding_pen.setEnabled(can_trace_bbox)
         self.btn_send_img.setEnabled(can_draw and not stream_active and not self._manual_busy)
         self.btn_pause_drawing.setEnabled(can_draw and stream_active)
         self.btn_stop_drawing.setEnabled(can_draw and stream_active)
