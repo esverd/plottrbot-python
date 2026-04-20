@@ -308,6 +308,7 @@ class MainWindow(QMainWindow):
         self.prep_controls_scroll.setObjectName("workflowPageScroll")
         self.prep_controls_scroll.setWidgetResizable(True)
         self.prep_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.prep_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.prep_controls_content = QWidget()
         layout = QVBoxLayout(self.prep_controls_content)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -368,8 +369,8 @@ class MainWindow(QMainWindow):
         output_layout.addWidget(QLabel("Output height [mm]"), 1, 2)
         output_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
-        self.checkbox_prep_lock_aspect = QCheckBox("Lock output aspect")
-        self.checkbox_prep_lock_aspect.setChecked(True)
+        self.checkbox_prep_lock_aspect = QCheckBox("Link output width/height")
+        self.checkbox_prep_lock_aspect.setChecked(False)
         output_layout.addWidget(self.checkbox_prep_lock_aspect, 1, 0, 1, 2)
         layout.addWidget(output_group)
 
@@ -394,42 +395,41 @@ class MainWindow(QMainWindow):
         crop_mode_row.addWidget(self.btn_prep_edit_masks)
         crop_layout.addLayout(crop_mode_row, 0, 2, 1, 2)
 
+        self.lbl_prep_crop_hint = QLabel("Crop shape follows the output width and height, so the result is not stretched.")
+        self.lbl_prep_crop_hint.setObjectName("secondaryInfo")
+        self.lbl_prep_crop_hint.setWordWrap(True)
+        crop_layout.addWidget(self.lbl_prep_crop_hint, 1, 0, 1, 4)
+
         self.prep_crop_controls_panel = QWidget()
         crop_controls_layout = QGridLayout(self.prep_crop_controls_panel)
         crop_controls_layout.setContentsMargins(0, 0, 0, 0)
         crop_controls_layout.setColumnStretch(1, 1)
 
-        self.slider_prep_crop_width = QSlider(Qt.Orientation.Horizontal)
-        self.slider_prep_crop_width.setRange(1, 100)
-        self.lbl_prep_crop_width_value = QLabel("100%")
-        self.lbl_prep_crop_width_value.setMinimumWidth(52)
-        self.lbl_prep_crop_width_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        crop_controls_layout.addWidget(QLabel("Crop width"), 0, 0)
-        crop_width_row = QHBoxLayout()
-        crop_width_row.setContentsMargins(0, 0, 0, 0)
-        crop_width_row.addWidget(self.slider_prep_crop_width, 1)
-        crop_width_row.addWidget(self.lbl_prep_crop_width_value)
-        crop_controls_layout.addLayout(crop_width_row, 0, 1, 1, 3)
+        self.slider_prep_crop_zoom = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_crop_zoom.setRange(100, 500)
+        self.slider_prep_crop_zoom.setValue(100)
+        self.lbl_prep_crop_zoom_value = QLabel("1.00x")
+        self.lbl_prep_crop_zoom_value.setMinimumWidth(58)
+        self.lbl_prep_crop_zoom_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        crop_controls_layout.addWidget(QLabel("Crop zoom"), 0, 0)
+        crop_zoom_row = QHBoxLayout()
+        crop_zoom_row.setContentsMargins(0, 0, 0, 0)
+        crop_zoom_row.addWidget(self.slider_prep_crop_zoom, 1)
+        crop_zoom_row.addWidget(self.lbl_prep_crop_zoom_value)
+        crop_controls_layout.addLayout(crop_zoom_row, 0, 1, 1, 3)
 
-        self.slider_prep_crop_height = QSlider(Qt.Orientation.Horizontal)
-        self.slider_prep_crop_height.setRange(1, 100)
-        self.lbl_prep_crop_height_value = QLabel("100%")
-        self.lbl_prep_crop_height_value.setMinimumWidth(52)
-        self.lbl_prep_crop_height_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        crop_controls_layout.addWidget(QLabel("Crop height"), 1, 0)
-        crop_height_row = QHBoxLayout()
-        crop_height_row.setContentsMargins(0, 0, 0, 0)
-        crop_height_row.addWidget(self.slider_prep_crop_height, 1)
-        crop_height_row.addWidget(self.lbl_prep_crop_height_value)
-        crop_controls_layout.addLayout(crop_height_row, 1, 1, 1, 3)
+        self.lbl_prep_crop_size = QLabel("Crop window: n/a")
+        self.lbl_prep_crop_size.setObjectName("secondaryInfo")
+        self.lbl_prep_crop_size.setWordWrap(True)
+        crop_controls_layout.addWidget(self.lbl_prep_crop_size, 1, 0, 1, 4)
 
         crop_actions = QHBoxLayout()
         self.btn_prep_reset_crop = QPushButton("Reset crop")
-        self.btn_prep_fit_crop_aspect = QPushButton("Match output aspect")
+        self.btn_prep_fit_crop_aspect = QPushButton("Fit crop to output")
         crop_actions.addWidget(self.btn_prep_reset_crop)
         crop_actions.addWidget(self.btn_prep_fit_crop_aspect)
         crop_controls_layout.addLayout(crop_actions, 2, 0, 1, 4)
-        crop_layout.addWidget(self.prep_crop_controls_panel, 1, 0, 1, 4)
+        crop_layout.addWidget(self.prep_crop_controls_panel, 2, 0, 1, 4)
         layout.addWidget(crop_group)
 
         adjustments_group = QGroupBox("Image adjustments")
@@ -655,10 +655,6 @@ class MainWindow(QMainWindow):
         mask_layout.addWidget(self.prep_mask_settings_panel, 2, 0, 1, 4)
         layout.addWidget(mask_group)
 
-        layout.addStretch(1)
-        self.prep_controls_scroll.setWidget(self.prep_controls_content)
-        page_layout.addWidget(self.prep_controls_scroll, 1)
-
         self.prep_action_bar = QWidget()
         self.prep_action_bar.setObjectName("prepActionBar")
         action_row = QHBoxLayout(self.prep_action_bar)
@@ -670,7 +666,11 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.btn_prep_save_outputs)
         action_row.addWidget(self.btn_prep_apply_to_control)
         action_row.addWidget(self.btn_prep_reset_defaults)
-        page_layout.addWidget(self.prep_action_bar, 0)
+        layout.addWidget(self.prep_action_bar)
+
+        layout.addStretch(1)
+        self.prep_controls_scroll.setWidget(self.prep_controls_content)
+        page_layout.addWidget(self.prep_controls_scroll, 1)
 
     def _build_place_page(self) -> None:
         layout = QVBoxLayout(self.place_page)
@@ -1070,8 +1070,8 @@ class MainWindow(QMainWindow):
         self.checkbox_prep_crop_enabled.toggled.connect(self._on_prep_crop_enabled_toggled)
         self.btn_prep_edit_crop.clicked.connect(self._on_prep_edit_mode_changed)
         self.btn_prep_edit_masks.clicked.connect(self._on_prep_edit_mode_changed)
-        self.slider_prep_crop_width.valueChanged.connect(self._on_prep_crop_controls_changed)
-        self.slider_prep_crop_height.valueChanged.connect(self._on_prep_crop_controls_changed)
+        self.slider_prep_crop_zoom.valueChanged.connect(self._on_prep_crop_controls_changed)
+        self.slider_prep_crop_zoom.sliderReleased.connect(self._flush_prep_recompute)
         self.btn_prep_reset_crop.clicked.connect(self._on_prep_reset_crop)
         self.btn_prep_fit_crop_aspect.clicked.connect(self._on_prep_fit_crop_to_output_aspect)
         self.btn_prep_add_mask.clicked.connect(self._on_prep_add_mask)
@@ -1426,13 +1426,106 @@ class MainWindow(QMainWindow):
 
     def _read_prep_crop_from_controls(self) -> ImagePrepCrop:
         current = self.image_prep_state.settings.crop.sanitized()
+        if not self.checkbox_prep_crop_enabled.isChecked():
+            return replace(current, enabled=False).sanitized()
+        return self._crop_from_zoom_control(current)
+
+    def _base_crop_dimensions_for_output(self) -> tuple[float, float] | None:
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            return None
+        source_width, source_height = artifacts.source_preview_image.size
+        if source_width <= 0 or source_height <= 0:
+            return None
+        source_aspect = float(source_width) / float(source_height)
+        target_width = max(1e-9, float(self.spin_prep_width_mm.value()))
+        target_height = max(1e-9, float(self.spin_prep_height_mm.value()))
+        target_aspect = target_width / target_height
+        if target_aspect >= source_aspect:
+            return 1.0, source_aspect / target_aspect
+        return target_aspect / source_aspect, 1.0
+
+    def _crop_from_zoom_control(self, current: ImagePrepCrop | None = None) -> ImagePrepCrop:
+        current_crop = (current or self.image_prep_state.settings.crop).sanitized()
+        base_dimensions = self._base_crop_dimensions_for_output()
+        if base_dimensions is None:
+            return replace(current_crop, enabled=True).sanitized()
+        base_width, base_height = base_dimensions
+        zoom = max(1.0, float(self.slider_prep_crop_zoom.value()) / 100.0)
         return ImagePrepCrop(
-            enabled=self.checkbox_prep_crop_enabled.isChecked(),
-            center_x=current.center_x,
-            center_y=current.center_y,
-            width=float(self.slider_prep_crop_width.value()) / 100.0,
-            height=float(self.slider_prep_crop_height.value()) / 100.0,
+            enabled=True,
+            center_x=current_crop.center_x,
+            center_y=current_crop.center_y,
+            width=base_width / zoom,
+            height=base_height / zoom,
         ).sanitized()
+
+    def _zoom_slider_value_for_crop(self, crop: ImagePrepCrop) -> int:
+        base_dimensions = self._base_crop_dimensions_for_output()
+        if base_dimensions is None:
+            return 100
+        base_width, base_height = base_dimensions
+        current = crop.sanitized()
+        width_coverage = current.width / max(base_width, 1e-9)
+        height_coverage = current.height / max(base_height, 1e-9)
+        coverage = max(0.01, min(width_coverage, height_coverage, 1.0))
+        zoom_value = int(round(100.0 / coverage))
+        return max(
+            self.slider_prep_crop_zoom.minimum(),
+            min(self.slider_prep_crop_zoom.maximum(), zoom_value),
+        )
+
+    def _effective_crop_rect(self, crop: ImagePrepCrop) -> tuple[float, float, float, float]:
+        current = crop.sanitized()
+        if not current.enabled:
+            return 0.0, 0.0, 1.0, 1.0
+        return (
+            current.center_x - (current.width / 2.0),
+            current.center_y - (current.height / 2.0),
+            current.width,
+            current.height,
+        )
+
+    def _transform_masks_between_crops(
+        self,
+        masks: list[ImagePrepMask],
+        *,
+        old_crop: ImagePrepCrop,
+        new_crop: ImagePrepCrop,
+    ) -> list[ImagePrepMask]:
+        old_left, old_top, old_width, old_height = self._effective_crop_rect(old_crop)
+        new_left, new_top, new_width, new_height = self._effective_crop_rect(new_crop)
+        transformed: list[ImagePrepMask] = []
+        for mask in masks:
+            current = mask.sanitized()
+            source_center_x = old_left + (current.center_x * old_width)
+            source_center_y = old_top + (current.center_y * old_height)
+            transformed.append(
+                replace(
+                    current,
+                    center_x=(source_center_x - new_left) / max(new_width, 1e-9),
+                    center_y=(source_center_y - new_top) / max(new_height, 1e-9),
+                    width=current.width * old_width / max(new_width, 1e-9),
+                    height=current.height * old_height / max(new_height, 1e-9),
+                ).sanitized()
+            )
+        return transformed
+
+    def _set_prep_crop_preserving_source_masks(
+        self,
+        new_crop: ImagePrepCrop,
+        *,
+        transform_masks: bool = True,
+    ) -> None:
+        old_crop = self.image_prep_state.settings.crop.sanitized()
+        target_crop = new_crop.sanitized()
+        if transform_masks:
+            self.image_prep_state.settings.local_masks = self._transform_masks_between_crops(
+                self.image_prep_state.settings.local_masks,
+                old_crop=old_crop,
+                new_crop=target_crop,
+            )
+        self.image_prep_state.settings.crop = target_crop
 
     def _sync_prep_crop_controls_from_state(self) -> None:
         crop = self.image_prep_state.settings.crop.sanitized()
@@ -1440,16 +1533,27 @@ class MainWindow(QMainWindow):
         self._prep_crop_controls_syncing = True
         self.checkbox_prep_crop_enabled.setChecked(crop.enabled)
         self.prep_crop_controls_panel.setVisible(crop.enabled)
-        self.slider_prep_crop_width.setValue(int(round(crop.width * 100.0)))
-        self.slider_prep_crop_height.setValue(int(round(crop.height * 100.0)))
+        self.slider_prep_crop_zoom.setValue(self._zoom_slider_value_for_crop(crop))
         if not crop.enabled:
             self.btn_prep_edit_masks.setChecked(True)
         self._update_prep_crop_value_labels()
         self._prep_crop_controls_syncing = False
 
     def _update_prep_crop_value_labels(self) -> None:
-        self.lbl_prep_crop_width_value.setText(f"{self.slider_prep_crop_width.value()}%")
-        self.lbl_prep_crop_height_value.setText(f"{self.slider_prep_crop_height.value()}%")
+        self.lbl_prep_crop_zoom_value.setText(f"{float(self.slider_prep_crop_zoom.value()) / 100.0:.2f}x")
+        crop = self.image_prep_state.settings.crop.sanitized()
+        artifacts = self.image_prep_state.artifacts
+        if not crop.enabled or artifacts is None:
+            self.lbl_prep_crop_size.setText("Crop window: inactive")
+            return
+        source_width, source_height = artifacts.source_preview_image.size
+        crop_width_px = max(1, int(round(crop.width * source_width)))
+        crop_height_px = max(1, int(round(crop.height * source_height)))
+        self.lbl_prep_crop_size.setText(
+            "Source window: "
+            f"{crop_width_px}x{crop_height_px}px -> "
+            f"{self.spin_prep_width_mm.value():.1f}x{self.spin_prep_height_mm.value():.1f} mm"
+        )
 
     def _selected_prep_mask(self) -> ImagePrepMask | None:
         masks = self.image_prep_state.settings.local_masks
@@ -1649,11 +1753,21 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing image", f"Source image does not exist:\n{image_path}")
             return False
 
+        source_open_uses_default_crop = (
+            sidecar_path is None
+            and settings is not None
+            and settings.target_width_mm <= 0.0
+            and settings.target_height_mm <= 0.0
+            and not settings.crop.enabled
+            and not settings.local_masks
+        )
         effective_settings = (settings or self.image_prep_state.settings).sanitized()
         if effective_settings.target_width_mm <= 0.0 or effective_settings.target_height_mm <= 0.0:
             default_width_mm, default_height_mm = self._default_target_dimensions_for_source(image_path)
             effective_settings.target_width_mm = default_width_mm
             effective_settings.target_height_mm = default_height_mm
+        if source_open_uses_default_crop:
+            effective_settings.crop = ImagePrepCrop(enabled=True).sanitized()
         effective_settings, clamped = self._sanitize_prep_settings_for_machine(effective_settings)
         if clamped:
             self._show_toast("Image dimensions were clamped to robot limits.")
@@ -1666,6 +1780,8 @@ class MainWindow(QMainWindow):
         self.image_prep_state.linked_to_control = False
         self.image_prep_state.artifacts = None
         self.image_prep_state.dirty = bool(mark_dirty)
+        if source_open_uses_default_crop:
+            self.btn_prep_edit_crop.setChecked(True)
 
         self._sync_prep_controls_from_state()
         if not self._recompute_prep_artifacts(mark_dirty=mark_dirty):
@@ -1915,10 +2031,16 @@ class MainWindow(QMainWindow):
             default_settings.target_height_mm = 400.0
 
         self._prep_updating_controls = True
-        self.checkbox_prep_lock_aspect.setChecked(True)
+        self.checkbox_prep_lock_aspect.setChecked(False)
         self._prep_updating_controls = False
+        default_settings.crop = ImagePrepCrop(enabled=source is not None)
         self.image_prep_state.settings = default_settings.sanitized()
+        if source is not None:
+            self.btn_prep_edit_crop.setChecked(True)
         self._sync_prep_controls_from_state()
+        if source is not None:
+            self._set_prep_crop_to_output_aspect(reset_center=True, reset_zoom=True)
+            self._sync_prep_crop_controls_from_state()
         if source is not None:
             self._recompute_prep_artifacts(mark_dirty=True)
         self._show_toast("Image prep settings reset to defaults.")
@@ -1945,17 +2067,20 @@ class MainWindow(QMainWindow):
         if self._prep_updating_controls:
             return
         if not self.checkbox_prep_lock_aspect.isChecked():
+            self._set_prep_crop_to_output_aspect()
             self._on_prep_settings_changed()
             return
 
         sender = self.sender()
         if sender not in {self.spin_prep_width_mm, self.spin_prep_height_mm}:
+            self._set_prep_crop_to_output_aspect()
             self._on_prep_settings_changed()
             return
 
         current_width = self.spin_prep_width_mm.value()
         current_height = self.spin_prep_height_mm.value()
         if current_width <= 0.0 or current_height <= 0.0:
+            self._set_prep_crop_to_output_aspect()
             self._on_prep_settings_changed()
             return
 
@@ -1975,6 +2100,7 @@ class MainWindow(QMainWindow):
             )
 
         if aspect_ratio is None or aspect_ratio <= 0.0:
+            self._set_prep_crop_to_output_aspect()
             self._on_prep_settings_changed()
             return
 
@@ -1986,6 +2112,7 @@ class MainWindow(QMainWindow):
             new_width = max(1.0, current_height * aspect_ratio)
             self.spin_prep_width_mm.setValue(new_width)
         self._prep_updating_controls = False
+        self._set_prep_crop_to_output_aspect()
         self._on_prep_settings_changed()
 
     def _schedule_prep_recompute(self, *, delay_ms: int = 80) -> None:
@@ -2116,24 +2243,14 @@ class MainWindow(QMainWindow):
     def _on_prep_crop_enabled_toggled(self, checked: bool) -> None:
         if self._prep_updating_controls or self._prep_crop_controls_syncing:
             return
+        current = self.image_prep_state.settings.crop.sanitized()
         if checked:
             self.btn_prep_edit_crop.setChecked(True)
-            current = self.image_prep_state.settings.crop.sanitized()
-            if (
-                abs(current.center_x - 0.5) < 0.001
-                and abs(current.center_y - 0.5) < 0.001
-                and abs(current.width - 1.0) < 0.001
-                and abs(current.height - 1.0) < 0.001
-                and self._set_prep_crop_to_output_aspect()
-            ):
-                self._sync_prep_crop_controls_from_state()
-                self._on_prep_settings_changed()
-                return
+            self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(current))
         else:
             self.btn_prep_edit_masks.setChecked(True)
-        self.prep_crop_controls_panel.setVisible(checked)
-        current = self.image_prep_state.settings.crop.sanitized()
-        self.image_prep_state.settings.crop = replace(current, enabled=checked).sanitized()
+            self._set_prep_crop_preserving_source_masks(replace(current, enabled=False).sanitized())
+        self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()
 
     def _on_prep_edit_mode_changed(self, *_args: object) -> None:
@@ -2145,7 +2262,8 @@ class MainWindow(QMainWindow):
         self._update_prep_crop_value_labels()
         if self._prep_updating_controls or self._prep_crop_controls_syncing:
             return
-        self.image_prep_state.settings.crop = self._read_prep_crop_from_controls()
+        self._set_prep_crop_preserving_source_masks(self._read_prep_crop_from_controls())
+        self._update_prep_crop_value_labels()
         self._schedule_prep_recompute(delay_ms=90)
 
     def _on_prep_crop_moved(self, center_x: float, center_y: float) -> None:
@@ -2156,39 +2274,39 @@ class MainWindow(QMainWindow):
             center_x=float(center_x),
             center_y=float(center_y),
         ).sanitized()
-        self.image_prep_state.settings.crop = crop
+        self._set_prep_crop_preserving_source_masks(crop)
         self._schedule_prep_recompute(delay_ms=160)
 
     def _on_prep_reset_crop(self) -> None:
         if self._prep_updating_controls:
             return
-        self.image_prep_state.settings.crop = ImagePrepCrop(enabled=True).sanitized()
+        self._prep_crop_controls_syncing = True
+        self.slider_prep_crop_zoom.setValue(100)
+        self._prep_crop_controls_syncing = False
         self.btn_prep_edit_crop.setChecked(True)
+        reset_seed = ImagePrepCrop(enabled=True, center_x=0.5, center_y=0.5)
+        self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(reset_seed))
         self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()
 
-    def _set_prep_crop_to_output_aspect(self) -> bool:
-        artifacts = self.image_prep_state.artifacts
-        if artifacts is None:
+    def _set_prep_crop_to_output_aspect(
+        self,
+        *,
+        reset_center: bool = False,
+        reset_zoom: bool = False,
+    ) -> bool:
+        if not self.image_prep_state.settings.crop.enabled:
             return False
-        target_width = max(1e-9, float(self.spin_prep_width_mm.value()))
-        target_height = max(1e-9, float(self.spin_prep_height_mm.value()))
-        target_aspect = target_width / target_height
-        source_width, source_height = artifacts.source_preview_image.size
-        source_aspect = max(1e-9, source_width / max(source_height, 1))
-        if target_aspect >= source_aspect:
-            crop_width = 1.0
-            crop_height = source_aspect / target_aspect
-        else:
-            crop_width = target_aspect / source_aspect
-            crop_height = 1.0
-        self.image_prep_state.settings.crop = ImagePrepCrop(
-            enabled=True,
-            center_x=0.5,
-            center_y=0.5,
-            width=crop_width,
-            height=crop_height,
-        ).sanitized()
+        if self._base_crop_dimensions_for_output() is None:
+            return False
+        if reset_zoom:
+            self._prep_crop_controls_syncing = True
+            self.slider_prep_crop_zoom.setValue(100)
+            self._prep_crop_controls_syncing = False
+        current = self.image_prep_state.settings.crop.sanitized()
+        if reset_center:
+            current = replace(current, center_x=0.5, center_y=0.5).sanitized()
+        self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(current))
         return True
 
     def _on_prep_fit_crop_to_output_aspect(self) -> None:
@@ -3171,10 +3289,9 @@ class MainWindow(QMainWindow):
         self.checkbox_prep_crop_enabled.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_edit_crop.setEnabled(prep_crop_enabled and prep_controls_enabled)
         self.btn_prep_edit_masks.setEnabled(prep_has_source and prep_controls_enabled)
-        self.slider_prep_crop_width.setEnabled(prep_crop_enabled and prep_controls_enabled)
-        self.slider_prep_crop_height.setEnabled(prep_crop_enabled and prep_controls_enabled)
+        self.slider_prep_crop_zoom.setEnabled(prep_crop_enabled and prep_controls_enabled)
         self.btn_prep_reset_crop.setEnabled(prep_crop_enabled and prep_controls_enabled)
-        self.btn_prep_fit_crop_aspect.setEnabled(prep_has_source and prep_controls_enabled)
+        self.btn_prep_fit_crop_aspect.setEnabled(prep_crop_enabled and prep_controls_enabled)
         self.btn_prep_add_mask.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_remove_mask.setEnabled(prep_has_selected_mask and prep_controls_enabled)
         self.slider_prep_mask_width.setEnabled(prep_has_selected_mask and prep_controls_enabled)

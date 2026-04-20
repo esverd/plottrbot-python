@@ -57,8 +57,9 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
   - adjust exposure, contrast, blur, tonal levels, and thresholds
   - add optional local masks
 - Preview can toggle between tonal and halftone views.
-- `Use crop window` crops the loaded JPG before prep resizing; use `Move crop window` to drag the crop window, and `Edit masks` to return to local mask editing.
-- `Match output aspect` creates a crop window with the same aspect ratio as the current output size.
+- New JPGs start with a crop window enabled. Set the output width/height first; the crop shape follows those dimensions so the image is not stretched.
+- Use `Move crop window` to drag the crop window, and use `Crop zoom` to decide how much of the source image is included.
+- `Fit crop to output` re-syncs the crop shape to the current output dimensions, useful after loading older sidecars.
 - `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`

@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from plottrbot.config.settings import default_end_gcode_lines
-from plottrbot.core.image_prep import ImagePrepSettings, read_sidecar
+from plottrbot.core.image_prep import ImagePrepCrop, ImagePrepMask, ImagePrepSettings, read_sidecar
 from plottrbot.serial.nano_transport import AckResult
 from plottrbot.serial.program_streamer import SendSessionState, SendStatus
 from plottrbot.ui.main_window import MainWindow
@@ -1059,6 +1059,7 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
     assert window.right_preview_stack.currentWidget() is window.prep_preview_panel
     assert window.workflow_buttons["prep"].isChecked() is True
     assert window.prep_controls_scroll.widgetResizable() is True
+    assert window.prep_controls_scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
     assert window.lbl_bbox_hint.text() == "Slice image, then connect USB to use footprint tools."
     assert window.lbl_run_state.text() == "No job image"
 
@@ -1075,7 +1076,7 @@ def test_unified_preview_switches_with_workflow_and_bmp_save_shows_toast(
     assert not hasattr(window, "btn_prep_skip_to_place")
     assert window.btn_prep_apply_to_control.text() == "Use in Place"
     assert window.btn_prep_edit_crop.text() == "Move crop window"
-    assert window.btn_prep_fit_crop_aspect.text() == "Match output aspect"
+    assert window.btn_prep_fit_crop_aspect.text() == "Fit crop to output"
     window._set_workflow_page("place")
     assert window.workflow_stack.currentWidget() is window.place_page
     window._set_workflow_page("prep")
@@ -1196,35 +1197,97 @@ def test_image_prep_crop_controls_update_settings_and_sidecar(qtbot, settings_st
     assert window.btn_prep_edit_crop.isChecked() is True
     assert window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01)
     assert window.image_prep_state.settings.crop.height == pytest.approx(1.0, abs=0.01)
-    assert window.lbl_prep_crop_width_value.text() == "50%"
-    assert window.lbl_prep_crop_height_value.text() == "100%"
+    assert window.lbl_prep_crop_zoom_value.text() == "1.00x"
+    assert "40x40px" in window.lbl_prep_crop_size.text()
 
-    window.slider_prep_crop_width.setValue(50)
-    window.slider_prep_crop_height.setValue(75)
-    qtbot.waitUntil(lambda: window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01), timeout=1500)
+    window.slider_prep_crop_zoom.setValue(200)
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.crop.width == pytest.approx(0.25, abs=0.01), timeout=1500)
     assert window.image_prep_state.settings.crop.enabled is True
-    assert window.image_prep_state.settings.crop.height == pytest.approx(0.75, abs=0.01)
-    assert window.lbl_prep_crop_width_value.text() == "50%"
-    assert window.lbl_prep_crop_height_value.text() == "75%"
+    assert window.image_prep_state.settings.crop.height == pytest.approx(0.5, abs=0.01)
+    assert window.lbl_prep_crop_zoom_value.text() == "2.00x"
+    assert "20x20px" in window.lbl_prep_crop_size.text()
 
     window._on_prep_crop_moved(0.25, 0.75)
     qtbot.waitUntil(lambda: window.image_prep_state.settings.crop.center_x == pytest.approx(0.25, abs=0.01), timeout=1500)
-    assert window.image_prep_state.settings.crop.center_y == pytest.approx(0.625, abs=0.01)
+    assert window.image_prep_state.settings.crop.center_y == pytest.approx(0.75, abs=0.01)
 
     window._on_prep_fit_crop_to_output_aspect()
-    assert window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01)
-    assert window.image_prep_state.settings.crop.height == pytest.approx(1.0, abs=0.01)
+    assert window.image_prep_state.settings.crop.width == pytest.approx(0.25, abs=0.01)
+    assert window.image_prep_state.settings.crop.height == pytest.approx(0.5, abs=0.01)
 
     sidecar_path = window._save_prep_sidecar()
     assert sidecar_path is not None
     _, loaded_settings, _ = read_sidecar(sidecar_path)
     assert loaded_settings.crop.enabled is True
-    assert loaded_settings.crop.width == pytest.approx(0.5, abs=0.01)
-    assert loaded_settings.crop.height == pytest.approx(1.0, abs=0.01)
+    assert loaded_settings.crop.width == pytest.approx(0.25, abs=0.01)
+    assert loaded_settings.crop.height == pytest.approx(0.5, abs=0.01)
 
     window.checkbox_prep_crop_enabled.setChecked(False)
     assert window.prep_crop_controls_panel.isHidden() is True
     assert window.btn_prep_edit_masks.isChecked() is True
+
+
+def test_image_prep_canvas_size_retargets_crop_without_stretch(
+    qtbot, settings_store, tmp_path: Path
+) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "square_canvas.jpg"
+    _create_rect_jpg(jpg_path, width=80, height=40)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35),
+        mark_dirty=True,
+    )
+    assert window.checkbox_prep_lock_aspect.isChecked() is False
+    assert window.image_prep_state.settings.crop.enabled is True
+
+    window.spin_prep_width_mm.setValue(500.0)
+    window.spin_prep_height_mm.setValue(500.0)
+
+    qtbot.waitUntil(
+        lambda: window.image_prep_state.artifacts is not None
+        and window.image_prep_state.artifacts.image_width_mm == pytest.approx(500.0, abs=1.0),
+        timeout=1500,
+    )
+    assert window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01)
+    assert window.image_prep_state.settings.crop.height == pytest.approx(1.0, abs=0.01)
+    assert window.image_prep_state.artifacts is not None
+    assert window.image_prep_state.artifacts.image_height_mm == pytest.approx(500.0, abs=1.0)
+
+
+def test_crop_changes_preserve_mask_source_position(qtbot, settings_store) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    mask = ImagePrepMask(center_x=0.5, center_y=0.5, width=0.2, height=0.3)
+    old_crop = ImagePrepCrop(enabled=True, center_x=0.5, center_y=0.5, width=0.5, height=1.0)
+    new_crop = ImagePrepCrop(enabled=True, center_x=0.5, center_y=0.5, width=0.25, height=0.5)
+
+    transformed = window._transform_masks_between_crops([mask], old_crop=old_crop, new_crop=new_crop)[0]
+
+    old_left, old_top, old_width, old_height = window._effective_crop_rect(old_crop)
+    new_left, new_top, new_width, new_height = window._effective_crop_rect(new_crop)
+    old_source = (
+        old_left + (mask.center_x * old_width),
+        old_top + (mask.center_y * old_height),
+    )
+    new_source = (
+        new_left + (transformed.center_x * new_width),
+        new_top + (transformed.center_y * new_height),
+    )
+    assert new_source == pytest.approx(old_source, abs=0.001)
 
 
 def test_image_prep_local_mask_controls_update_settings_and_sidecar(
@@ -1363,7 +1426,7 @@ def test_image_prep_reset_defaults_restores_core_controls(qtbot, settings_store,
     assert window.spin_prep_levels.value() == 4
     assert window.combo_prep_strategy.currentText() == "banded"
     assert window.checkbox_prep_auto_thresholds.isChecked() is True
-    assert window.checkbox_prep_lock_aspect.isChecked() is True
+    assert window.checkbox_prep_lock_aspect.isChecked() is False
 
 
 def test_image_prep_dimension_entry_clamps_after_commit(qtbot, settings_store, tmp_path: Path) -> None:
