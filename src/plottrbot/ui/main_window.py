@@ -300,7 +300,16 @@ class MainWindow(QMainWindow):
         self._set_workflow_page("prep")
 
     def _build_image_prep_tab(self) -> None:
-        layout = QVBoxLayout(self.image_prep_tab)
+        page_layout = QVBoxLayout(self.image_prep_tab)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(8)
+
+        self.prep_controls_scroll = QScrollArea()
+        self.prep_controls_scroll.setObjectName("workflowPageScroll")
+        self.prep_controls_scroll.setWidgetResizable(True)
+        self.prep_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.prep_controls_content = QWidget()
+        layout = QVBoxLayout(self.prep_controls_content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
@@ -330,16 +339,16 @@ class MainWindow(QMainWindow):
         source_layout.addWidget(self.lbl_prep_dimensions)
         layout.addWidget(source_group)
 
-        controls_group = QGroupBox("Prep controls")
-        controls_layout = QGridLayout(controls_group)
-        controls_layout.setColumnStretch(1, 1)
-        controls_layout.setColumnStretch(3, 1)
+        output_group = QGroupBox("Output size and marker")
+        output_layout = QGridLayout(output_group)
+        output_layout.setColumnStretch(1, 1)
+        output_layout.setColumnStretch(3, 1)
 
         self.spin_prep_dpi = QSpinBox()
         self.spin_prep_dpi.setRange(1, 1200)
         self.spin_prep_dpi.setValue(self.DEFAULT_BMP_DPI)
-        controls_layout.addWidget(QLabel("DPI"), 0, 0)
-        controls_layout.addWidget(self.spin_prep_dpi, 0, 1)
+        output_layout.addWidget(QLabel("Marker DPI"), 0, 0)
+        output_layout.addWidget(self.spin_prep_dpi, 0, 1)
 
         self.spin_prep_width_mm = QDoubleSpinBox()
         self.spin_prep_width_mm.setRange(1.0, 100000.0)
@@ -347,8 +356,8 @@ class MainWindow(QMainWindow):
         self.spin_prep_width_mm.setDecimals(1)
         self.spin_prep_width_mm.setKeyboardTracking(False)
         self.spin_prep_width_mm.setValue(100.0)
-        controls_layout.addWidget(QLabel("Width [mm]"), 0, 2)
-        controls_layout.addWidget(self.spin_prep_width_mm, 0, 3)
+        output_layout.addWidget(QLabel("Output width [mm]"), 0, 2)
+        output_layout.addWidget(self.spin_prep_width_mm, 0, 3)
 
         self.spin_prep_height_mm = QDoubleSpinBox()
         self.spin_prep_height_mm.setRange(1.0, 100000.0)
@@ -356,10 +365,79 @@ class MainWindow(QMainWindow):
         self.spin_prep_height_mm.setDecimals(1)
         self.spin_prep_height_mm.setKeyboardTracking(False)
         self.spin_prep_height_mm.setValue(100.0)
-        controls_layout.addWidget(QLabel("Height [mm]"), 1, 2)
-        controls_layout.addWidget(self.spin_prep_height_mm, 1, 3)
+        output_layout.addWidget(QLabel("Output height [mm]"), 1, 2)
+        output_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
-        controls_layout.addWidget(QLabel("Exposure"), 2, 0)
+        self.checkbox_prep_lock_aspect = QCheckBox("Lock output aspect")
+        self.checkbox_prep_lock_aspect.setChecked(True)
+        output_layout.addWidget(self.checkbox_prep_lock_aspect, 1, 0, 1, 2)
+        layout.addWidget(output_group)
+
+        crop_group = QGroupBox("Crop and framing")
+        crop_layout = QGridLayout(crop_group)
+        crop_layout.setColumnStretch(1, 1)
+
+        self.checkbox_prep_crop_enabled = QCheckBox("Use crop window")
+        crop_layout.addWidget(self.checkbox_prep_crop_enabled, 0, 0, 1, 2)
+
+        crop_mode_row = QHBoxLayout()
+        self.btn_prep_edit_crop = QPushButton("Move crop window")
+        self.btn_prep_edit_masks = QPushButton("Edit masks")
+        self.btn_prep_edit_crop.setCheckable(True)
+        self.btn_prep_edit_masks.setCheckable(True)
+        self.btn_prep_edit_masks.setChecked(True)
+        self.prep_edit_mode_buttons = QButtonGroup(self)
+        self.prep_edit_mode_buttons.setExclusive(True)
+        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_crop)
+        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_masks)
+        crop_mode_row.addWidget(self.btn_prep_edit_crop)
+        crop_mode_row.addWidget(self.btn_prep_edit_masks)
+        crop_layout.addLayout(crop_mode_row, 0, 2, 1, 2)
+
+        self.prep_crop_controls_panel = QWidget()
+        crop_controls_layout = QGridLayout(self.prep_crop_controls_panel)
+        crop_controls_layout.setContentsMargins(0, 0, 0, 0)
+        crop_controls_layout.setColumnStretch(1, 1)
+
+        self.slider_prep_crop_width = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_crop_width.setRange(1, 100)
+        self.lbl_prep_crop_width_value = QLabel("100%")
+        self.lbl_prep_crop_width_value.setMinimumWidth(52)
+        self.lbl_prep_crop_width_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        crop_controls_layout.addWidget(QLabel("Crop width"), 0, 0)
+        crop_width_row = QHBoxLayout()
+        crop_width_row.setContentsMargins(0, 0, 0, 0)
+        crop_width_row.addWidget(self.slider_prep_crop_width, 1)
+        crop_width_row.addWidget(self.lbl_prep_crop_width_value)
+        crop_controls_layout.addLayout(crop_width_row, 0, 1, 1, 3)
+
+        self.slider_prep_crop_height = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_crop_height.setRange(1, 100)
+        self.lbl_prep_crop_height_value = QLabel("100%")
+        self.lbl_prep_crop_height_value.setMinimumWidth(52)
+        self.lbl_prep_crop_height_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        crop_controls_layout.addWidget(QLabel("Crop height"), 1, 0)
+        crop_height_row = QHBoxLayout()
+        crop_height_row.setContentsMargins(0, 0, 0, 0)
+        crop_height_row.addWidget(self.slider_prep_crop_height, 1)
+        crop_height_row.addWidget(self.lbl_prep_crop_height_value)
+        crop_controls_layout.addLayout(crop_height_row, 1, 1, 1, 3)
+
+        crop_actions = QHBoxLayout()
+        self.btn_prep_reset_crop = QPushButton("Reset crop")
+        self.btn_prep_fit_crop_aspect = QPushButton("Match output aspect")
+        crop_actions.addWidget(self.btn_prep_reset_crop)
+        crop_actions.addWidget(self.btn_prep_fit_crop_aspect)
+        crop_controls_layout.addLayout(crop_actions, 2, 0, 1, 4)
+        crop_layout.addWidget(self.prep_crop_controls_panel, 1, 0, 1, 4)
+        layout.addWidget(crop_group)
+
+        adjustments_group = QGroupBox("Image adjustments")
+        controls_layout = QGridLayout(adjustments_group)
+        controls_layout.setColumnStretch(1, 1)
+        controls_layout.setColumnStretch(3, 1)
+
+        controls_layout.addWidget(QLabel("Exposure"), 0, 0)
         exposure_row = QHBoxLayout()
         exposure_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_exposure = QSlider(Qt.Orientation.Horizontal)
@@ -370,9 +448,9 @@ class MainWindow(QMainWindow):
         self.lbl_prep_exposure_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         exposure_row.addWidget(self.slider_prep_exposure, 1)
         exposure_row.addWidget(self.lbl_prep_exposure_value)
-        controls_layout.addLayout(exposure_row, 2, 1, 1, 3)
+        controls_layout.addLayout(exposure_row, 0, 1, 1, 3)
 
-        controls_layout.addWidget(QLabel("Contrast"), 3, 0)
+        controls_layout.addWidget(QLabel("Contrast"), 1, 0)
         contrast_row = QHBoxLayout()
         contrast_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_contrast = QSlider(Qt.Orientation.Horizontal)
@@ -386,9 +464,9 @@ class MainWindow(QMainWindow):
         self.spin_prep_contrast.setMinimumWidth(84)
         contrast_row.addWidget(self.slider_prep_contrast, 1)
         contrast_row.addWidget(self.spin_prep_contrast)
-        controls_layout.addLayout(contrast_row, 3, 1, 1, 3)
+        controls_layout.addLayout(contrast_row, 1, 1, 1, 3)
 
-        controls_layout.addWidget(QLabel("Blur"), 4, 0)
+        controls_layout.addWidget(QLabel("Blur"), 2, 0)
         blur_row = QHBoxLayout()
         blur_row.setContentsMargins(0, 0, 0, 0)
         self.slider_prep_blur = QSlider(Qt.Orientation.Horizontal)
@@ -403,33 +481,29 @@ class MainWindow(QMainWindow):
         self.spin_prep_blur.setMinimumWidth(84)
         blur_row.addWidget(self.slider_prep_blur, 1)
         blur_row.addWidget(self.spin_prep_blur)
-        controls_layout.addLayout(blur_row, 4, 1, 1, 3)
+        controls_layout.addLayout(blur_row, 2, 1, 1, 3)
 
         self.spin_prep_levels = QSpinBox()
         self.spin_prep_levels.setRange(2, 8)
         self.spin_prep_levels.setValue(4)
-        controls_layout.addWidget(QLabel("Tone levels"), 5, 0)
-        controls_layout.addWidget(self.spin_prep_levels, 5, 1)
+        controls_layout.addWidget(QLabel("Tone levels"), 3, 0)
+        controls_layout.addWidget(self.spin_prep_levels, 3, 1)
 
         self.combo_prep_strategy = QComboBox()
         self.combo_prep_strategy.addItems(["banded", "relative"])
-        controls_layout.addWidget(QLabel("Threshold mode"), 5, 2)
-        controls_layout.addWidget(self.combo_prep_strategy, 5, 3)
-
-        self.checkbox_prep_lock_aspect = QCheckBox("Lock aspect ratio")
-        self.checkbox_prep_lock_aspect.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_lock_aspect, 6, 0, 1, 2)
+        controls_layout.addWidget(QLabel("Threshold mode"), 3, 2)
+        controls_layout.addWidget(self.combo_prep_strategy, 3, 3)
 
         self.checkbox_prep_auto_thresholds = QCheckBox("Use auto thresholds")
         self.checkbox_prep_auto_thresholds.setChecked(True)
-        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 6, 2, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_auto_thresholds, 4, 0, 1, 2)
 
         self.checkbox_prep_halftone_preview = QCheckBox("Show halftone preview")
         self.checkbox_prep_halftone_preview.setChecked(False)
-        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 7, 0, 1, 2)
+        controls_layout.addWidget(self.checkbox_prep_halftone_preview, 4, 2, 1, 2)
 
         self.lbl_prep_manual_thresholds = QLabel("Manual thresholds")
-        controls_layout.addWidget(self.lbl_prep_manual_thresholds, 8, 0)
+        controls_layout.addWidget(self.lbl_prep_manual_thresholds, 5, 0)
         self.prep_threshold_container = QWidget()
         threshold_layout = QVBoxLayout(self.prep_threshold_container)
         threshold_layout.setContentsMargins(0, 0, 0, 0)
@@ -454,71 +528,12 @@ class MainWindow(QMainWindow):
             self._prep_threshold_rows.append(row_widget)
             self._prep_threshold_sliders.append(slider)
             self._prep_threshold_spinboxes.append(spin)
-        controls_layout.addWidget(self.prep_threshold_container, 8, 1, 1, 3)
+        controls_layout.addWidget(self.prep_threshold_container, 5, 1, 1, 3)
 
         self.lbl_prep_effective_thresholds = QLabel("Effective thresholds: n/a")
         self.lbl_prep_effective_thresholds.setWordWrap(True)
-        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 9, 0, 1, 4)
-        layout.addWidget(controls_group)
-
-        crop_group = QGroupBox("Crop source")
-        crop_layout = QGridLayout(crop_group)
-        crop_layout.setColumnStretch(1, 1)
-
-        self.checkbox_prep_crop_enabled = QCheckBox("Crop source")
-        crop_layout.addWidget(self.checkbox_prep_crop_enabled, 0, 0, 1, 2)
-
-        crop_mode_row = QHBoxLayout()
-        self.btn_prep_edit_crop = QPushButton("Edit crop")
-        self.btn_prep_edit_masks = QPushButton("Edit masks")
-        self.btn_prep_edit_crop.setCheckable(True)
-        self.btn_prep_edit_masks.setCheckable(True)
-        self.btn_prep_edit_masks.setChecked(True)
-        self.prep_edit_mode_buttons = QButtonGroup(self)
-        self.prep_edit_mode_buttons.setExclusive(True)
-        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_crop)
-        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_masks)
-        crop_mode_row.addWidget(self.btn_prep_edit_crop)
-        crop_mode_row.addWidget(self.btn_prep_edit_masks)
-        crop_layout.addLayout(crop_mode_row, 0, 2, 1, 2)
-
-        self.prep_crop_controls_panel = QWidget()
-        crop_controls_layout = QGridLayout(self.prep_crop_controls_panel)
-        crop_controls_layout.setContentsMargins(0, 0, 0, 0)
-        crop_controls_layout.setColumnStretch(1, 1)
-
-        self.slider_prep_crop_width = QSlider(Qt.Orientation.Horizontal)
-        self.slider_prep_crop_width.setRange(1, 100)
-        self.lbl_prep_crop_width_value = QLabel("100%")
-        self.lbl_prep_crop_width_value.setMinimumWidth(52)
-        self.lbl_prep_crop_width_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        crop_controls_layout.addWidget(QLabel("Width"), 0, 0)
-        crop_width_row = QHBoxLayout()
-        crop_width_row.setContentsMargins(0, 0, 0, 0)
-        crop_width_row.addWidget(self.slider_prep_crop_width, 1)
-        crop_width_row.addWidget(self.lbl_prep_crop_width_value)
-        crop_controls_layout.addLayout(crop_width_row, 0, 1, 1, 3)
-
-        self.slider_prep_crop_height = QSlider(Qt.Orientation.Horizontal)
-        self.slider_prep_crop_height.setRange(1, 100)
-        self.lbl_prep_crop_height_value = QLabel("100%")
-        self.lbl_prep_crop_height_value.setMinimumWidth(52)
-        self.lbl_prep_crop_height_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        crop_controls_layout.addWidget(QLabel("Height"), 1, 0)
-        crop_height_row = QHBoxLayout()
-        crop_height_row.setContentsMargins(0, 0, 0, 0)
-        crop_height_row.addWidget(self.slider_prep_crop_height, 1)
-        crop_height_row.addWidget(self.lbl_prep_crop_height_value)
-        crop_controls_layout.addLayout(crop_height_row, 1, 1, 1, 3)
-
-        crop_actions = QHBoxLayout()
-        self.btn_prep_reset_crop = QPushButton("Reset crop")
-        self.btn_prep_fit_crop_aspect = QPushButton("Fit output aspect")
-        crop_actions.addWidget(self.btn_prep_reset_crop)
-        crop_actions.addWidget(self.btn_prep_fit_crop_aspect)
-        crop_controls_layout.addLayout(crop_actions, 2, 0, 1, 4)
-        crop_layout.addWidget(self.prep_crop_controls_panel, 1, 0, 1, 4)
-        layout.addWidget(crop_group)
+        controls_layout.addWidget(self.lbl_prep_effective_thresholds, 6, 0, 1, 4)
+        layout.addWidget(adjustments_group)
 
         mask_group = QGroupBox("Local adjustments")
         mask_layout = QGridLayout(mask_group)
@@ -640,7 +655,14 @@ class MainWindow(QMainWindow):
         mask_layout.addWidget(self.prep_mask_settings_panel, 2, 0, 1, 4)
         layout.addWidget(mask_group)
 
-        action_row = QHBoxLayout()
+        layout.addStretch(1)
+        self.prep_controls_scroll.setWidget(self.prep_controls_content)
+        page_layout.addWidget(self.prep_controls_scroll, 1)
+
+        self.prep_action_bar = QWidget()
+        self.prep_action_bar.setObjectName("prepActionBar")
+        action_row = QHBoxLayout(self.prep_action_bar)
+        action_row.setContentsMargins(0, 0, 0, 0)
         self.btn_prep_save_outputs = QPushButton("Export BMP + sidecar")
         self.btn_prep_apply_to_control = QPushButton("Use in Place")
         self.btn_prep_reset_defaults = QPushButton("Reset defaults")
@@ -648,9 +670,7 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.btn_prep_save_outputs)
         action_row.addWidget(self.btn_prep_apply_to_control)
         action_row.addWidget(self.btn_prep_reset_defaults)
-        layout.addLayout(action_row)
-
-        layout.addStretch(1)
+        page_layout.addWidget(self.prep_action_bar, 0)
 
     def _build_place_page(self) -> None:
         layout = QVBoxLayout(self.place_page)
@@ -921,6 +941,16 @@ class MainWindow(QMainWindow):
             }
             QStackedWidget#workflowStack {
                 background: transparent;
+            }
+            QScrollArea#workflowPageScroll {
+                border: 0;
+                background: transparent;
+            }
+            QScrollArea#workflowPageScroll > QWidget > QWidget {
+                background: transparent;
+            }
+            QWidget#prepActionBar {
+                background: #f6f8fa;
             }
             QWidget#previewPanel {
                 background: #ffffff;
@@ -2088,6 +2118,17 @@ class MainWindow(QMainWindow):
             return
         if checked:
             self.btn_prep_edit_crop.setChecked(True)
+            current = self.image_prep_state.settings.crop.sanitized()
+            if (
+                abs(current.center_x - 0.5) < 0.001
+                and abs(current.center_y - 0.5) < 0.001
+                and abs(current.width - 1.0) < 0.001
+                and abs(current.height - 1.0) < 0.001
+                and self._set_prep_crop_to_output_aspect()
+            ):
+                self._sync_prep_crop_controls_from_state()
+                self._on_prep_settings_changed()
+                return
         else:
             self.btn_prep_edit_masks.setChecked(True)
         self.prep_crop_controls_panel.setVisible(checked)
@@ -2126,10 +2167,10 @@ class MainWindow(QMainWindow):
         self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()
 
-    def _on_prep_fit_crop_to_output_aspect(self) -> None:
+    def _set_prep_crop_to_output_aspect(self) -> bool:
         artifacts = self.image_prep_state.artifacts
         if artifacts is None:
-            return
+            return False
         target_width = max(1e-9, float(self.spin_prep_width_mm.value()))
         target_height = max(1e-9, float(self.spin_prep_height_mm.value()))
         target_aspect = target_width / target_height
@@ -2148,6 +2189,11 @@ class MainWindow(QMainWindow):
             width=crop_width,
             height=crop_height,
         ).sanitized()
+        return True
+
+    def _on_prep_fit_crop_to_output_aspect(self) -> None:
+        if not self._set_prep_crop_to_output_aspect():
+            return
         self.btn_prep_edit_crop.setChecked(True)
         self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()

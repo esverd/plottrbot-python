@@ -50,17 +50,15 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 
 ## Image Prep Workflow
 
-- Use the `Prep` workflow to open a JPG/JPEG or an existing sidecar and adjust:
-  - DPI
-  - target width/height in mm
-  - exposure
-  - Gaussian blur
-  - source crop window
-  - tonal levels (`2-8`)
-  - threshold strategy (`banded` or `relative`)
-  - auto/manual thresholds
+- Use the `Prep` workflow to open a JPG/JPEG or an existing sidecar, then work top-to-bottom:
+  - set output width/height in mm for the canvas area you want to draw
+  - set marker DPI for the amount of line detail
+  - crop/frame the source image
+  - adjust exposure, contrast, blur, tonal levels, and thresholds
+  - add optional local masks
 - Preview can toggle between tonal and halftone views.
-- `Crop source` can crop the loaded JPG before prep resizing; use `Edit crop` to drag the crop window, and `Edit masks` to return to local mask editing.
+- `Use crop window` crops the loaded JPG before prep resizing; use `Move crop window` to drag the crop window, and `Edit masks` to return to local mask editing.
+- `Match output aspect` creates a crop window with the same aspect ratio as the current output size.
 - `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
