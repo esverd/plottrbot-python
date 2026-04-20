@@ -51,16 +51,16 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
 ## Image Prep Workflow
 
 - Use the `Prep` workflow to open a JPG/JPEG or an existing sidecar, then work top-to-bottom:
-  - set output width/height in mm for the canvas area you want to draw
+  - set drawing width/height in mm for the canvas area you want to draw
   - set marker DPI for the amount of line detail
   - crop/frame the source image
   - adjust exposure, contrast, blur, tonal levels, and thresholds
   - add optional local masks
 - Preview can toggle between tonal and halftone views.
-- New JPGs start with a crop window enabled. Set the output width/height first; the crop shape follows those dimensions so the image is not stretched.
-- Use `Move crop window` to drag the crop window, and use `Crop zoom` to decide how much of the source image is included.
-- `Fit crop to output` re-syncs the crop shape to the current output dimensions, useful after loading older sidecars.
-- `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders.
+- New JPGs start with a frame enabled. Set drawing width/height first; the frame shape follows those dimensions so the source image is not stretched.
+- Use `Move frame` to drag the framed source area, and use `Frame zoom` to decide how much of the source image is included.
+- `Fit frame to drawing` re-syncs the frame shape to the current drawing dimensions, useful after loading older sidecars.
+- `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders. Masks stay fixed on the drawing area when the frame changes.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`
   - `<image-stem>.plottrbot-edit.json`

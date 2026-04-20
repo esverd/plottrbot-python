@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
         source_layout.addWidget(self.lbl_prep_dimensions)
         layout.addWidget(source_group)
 
-        output_group = QGroupBox("Output size and marker")
+        output_group = QGroupBox("Drawing size")
         output_layout = QGridLayout(output_group)
         output_layout.setColumnStretch(1, 1)
         output_layout.setColumnStretch(3, 1)
@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
         self.spin_prep_width_mm.setDecimals(1)
         self.spin_prep_width_mm.setKeyboardTracking(False)
         self.spin_prep_width_mm.setValue(100.0)
-        output_layout.addWidget(QLabel("Output width [mm]"), 0, 2)
+        output_layout.addWidget(QLabel("Drawing width [mm]"), 0, 2)
         output_layout.addWidget(self.spin_prep_width_mm, 0, 3)
 
         self.spin_prep_height_mm = QDoubleSpinBox()
@@ -366,23 +366,23 @@ class MainWindow(QMainWindow):
         self.spin_prep_height_mm.setDecimals(1)
         self.spin_prep_height_mm.setKeyboardTracking(False)
         self.spin_prep_height_mm.setValue(100.0)
-        output_layout.addWidget(QLabel("Output height [mm]"), 1, 2)
+        output_layout.addWidget(QLabel("Drawing height [mm]"), 1, 2)
         output_layout.addWidget(self.spin_prep_height_mm, 1, 3)
 
-        self.checkbox_prep_lock_aspect = QCheckBox("Link output width/height")
+        self.checkbox_prep_lock_aspect = QCheckBox("Link drawing width/height")
         self.checkbox_prep_lock_aspect.setChecked(False)
         output_layout.addWidget(self.checkbox_prep_lock_aspect, 1, 0, 1, 2)
         layout.addWidget(output_group)
 
-        crop_group = QGroupBox("Crop and framing")
+        crop_group = QGroupBox("Frame image")
         crop_layout = QGridLayout(crop_group)
         crop_layout.setColumnStretch(1, 1)
 
-        self.checkbox_prep_crop_enabled = QCheckBox("Use crop window")
+        self.checkbox_prep_crop_enabled = QCheckBox("Use frame")
         crop_layout.addWidget(self.checkbox_prep_crop_enabled, 0, 0, 1, 2)
 
         crop_mode_row = QHBoxLayout()
-        self.btn_prep_edit_crop = QPushButton("Move crop window")
+        self.btn_prep_edit_crop = QPushButton("Move frame")
         self.btn_prep_edit_masks = QPushButton("Edit masks")
         self.btn_prep_edit_crop.setCheckable(True)
         self.btn_prep_edit_masks.setCheckable(True)
@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         crop_mode_row.addWidget(self.btn_prep_edit_masks)
         crop_layout.addLayout(crop_mode_row, 0, 2, 1, 2)
 
-        self.lbl_prep_crop_hint = QLabel("Crop shape follows the output width and height, so the result is not stretched.")
+        self.lbl_prep_crop_hint = QLabel("Frame shape follows the drawing width and height, so the source is not stretched.")
         self.lbl_prep_crop_hint.setObjectName("secondaryInfo")
         self.lbl_prep_crop_hint.setWordWrap(True)
         crop_layout.addWidget(self.lbl_prep_crop_hint, 1, 0, 1, 4)
@@ -411,21 +411,21 @@ class MainWindow(QMainWindow):
         self.lbl_prep_crop_zoom_value = QLabel("1.00x")
         self.lbl_prep_crop_zoom_value.setMinimumWidth(58)
         self.lbl_prep_crop_zoom_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        crop_controls_layout.addWidget(QLabel("Crop zoom"), 0, 0)
+        crop_controls_layout.addWidget(QLabel("Frame zoom"), 0, 0)
         crop_zoom_row = QHBoxLayout()
         crop_zoom_row.setContentsMargins(0, 0, 0, 0)
         crop_zoom_row.addWidget(self.slider_prep_crop_zoom, 1)
         crop_zoom_row.addWidget(self.lbl_prep_crop_zoom_value)
         crop_controls_layout.addLayout(crop_zoom_row, 0, 1, 1, 3)
 
-        self.lbl_prep_crop_size = QLabel("Crop window: n/a")
+        self.lbl_prep_crop_size = QLabel("Frame: n/a")
         self.lbl_prep_crop_size.setObjectName("secondaryInfo")
         self.lbl_prep_crop_size.setWordWrap(True)
         crop_controls_layout.addWidget(self.lbl_prep_crop_size, 1, 0, 1, 4)
 
         crop_actions = QHBoxLayout()
-        self.btn_prep_reset_crop = QPushButton("Reset crop")
-        self.btn_prep_fit_crop_aspect = QPushButton("Fit crop to output")
+        self.btn_prep_reset_crop = QPushButton("Reset frame")
+        self.btn_prep_fit_crop_aspect = QPushButton("Fit frame to drawing")
         crop_actions.addWidget(self.btn_prep_reset_crop)
         crop_actions.addWidget(self.btn_prep_fit_crop_aspect)
         crop_controls_layout.addLayout(crop_actions, 2, 0, 1, 4)
@@ -1475,57 +1475,8 @@ class MainWindow(QMainWindow):
             min(self.slider_prep_crop_zoom.maximum(), zoom_value),
         )
 
-    def _effective_crop_rect(self, crop: ImagePrepCrop) -> tuple[float, float, float, float]:
-        current = crop.sanitized()
-        if not current.enabled:
-            return 0.0, 0.0, 1.0, 1.0
-        return (
-            current.center_x - (current.width / 2.0),
-            current.center_y - (current.height / 2.0),
-            current.width,
-            current.height,
-        )
-
-    def _transform_masks_between_crops(
-        self,
-        masks: list[ImagePrepMask],
-        *,
-        old_crop: ImagePrepCrop,
-        new_crop: ImagePrepCrop,
-    ) -> list[ImagePrepMask]:
-        old_left, old_top, old_width, old_height = self._effective_crop_rect(old_crop)
-        new_left, new_top, new_width, new_height = self._effective_crop_rect(new_crop)
-        transformed: list[ImagePrepMask] = []
-        for mask in masks:
-            current = mask.sanitized()
-            source_center_x = old_left + (current.center_x * old_width)
-            source_center_y = old_top + (current.center_y * old_height)
-            transformed.append(
-                replace(
-                    current,
-                    center_x=(source_center_x - new_left) / max(new_width, 1e-9),
-                    center_y=(source_center_y - new_top) / max(new_height, 1e-9),
-                    width=current.width * old_width / max(new_width, 1e-9),
-                    height=current.height * old_height / max(new_height, 1e-9),
-                ).sanitized()
-            )
-        return transformed
-
-    def _set_prep_crop_preserving_source_masks(
-        self,
-        new_crop: ImagePrepCrop,
-        *,
-        transform_masks: bool = True,
-    ) -> None:
-        old_crop = self.image_prep_state.settings.crop.sanitized()
-        target_crop = new_crop.sanitized()
-        if transform_masks:
-            self.image_prep_state.settings.local_masks = self._transform_masks_between_crops(
-                self.image_prep_state.settings.local_masks,
-                old_crop=old_crop,
-                new_crop=target_crop,
-            )
-        self.image_prep_state.settings.crop = target_crop
+    def _set_prep_crop(self, new_crop: ImagePrepCrop) -> None:
+        self.image_prep_state.settings.crop = new_crop.sanitized()
 
     def _sync_prep_crop_controls_from_state(self) -> None:
         crop = self.image_prep_state.settings.crop.sanitized()
@@ -1544,15 +1495,17 @@ class MainWindow(QMainWindow):
         crop = self.image_prep_state.settings.crop.sanitized()
         artifacts = self.image_prep_state.artifacts
         if not crop.enabled or artifacts is None:
-            self.lbl_prep_crop_size.setText("Crop window: inactive")
+            self.lbl_prep_crop_size.setText("Frame: inactive")
             return
         source_width, source_height = artifacts.source_preview_image.size
         crop_width_px = max(1, int(round(crop.width * source_width)))
         crop_height_px = max(1, int(round(crop.height * source_height)))
+        width_mm = float(self.spin_prep_width_mm.value())
+        height_mm = float(self.spin_prep_height_mm.value())
+        width_label = f"{width_mm:.0f}" if width_mm.is_integer() else f"{width_mm:.1f}"
+        height_label = f"{height_mm:.0f}" if height_mm.is_integer() else f"{height_mm:.1f}"
         self.lbl_prep_crop_size.setText(
-            "Source window: "
-            f"{crop_width_px}x{crop_height_px}px -> "
-            f"{self.spin_prep_width_mm.value():.1f}x{self.spin_prep_height_mm.value():.1f} mm"
+            f"Frame: {crop_width_px} x {crop_height_px} px -> {width_label} x {height_label} mm"
         )
 
     def _selected_prep_mask(self) -> ImagePrepMask | None:
@@ -2246,10 +2199,10 @@ class MainWindow(QMainWindow):
         current = self.image_prep_state.settings.crop.sanitized()
         if checked:
             self.btn_prep_edit_crop.setChecked(True)
-            self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(current))
+            self._set_prep_crop(self._crop_from_zoom_control(current))
         else:
             self.btn_prep_edit_masks.setChecked(True)
-            self._set_prep_crop_preserving_source_masks(replace(current, enabled=False).sanitized())
+            self._set_prep_crop(replace(current, enabled=False).sanitized())
         self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()
 
@@ -2262,7 +2215,7 @@ class MainWindow(QMainWindow):
         self._update_prep_crop_value_labels()
         if self._prep_updating_controls or self._prep_crop_controls_syncing:
             return
-        self._set_prep_crop_preserving_source_masks(self._read_prep_crop_from_controls())
+        self._set_prep_crop(self._read_prep_crop_from_controls())
         self._update_prep_crop_value_labels()
         self._schedule_prep_recompute(delay_ms=90)
 
@@ -2274,7 +2227,7 @@ class MainWindow(QMainWindow):
             center_x=float(center_x),
             center_y=float(center_y),
         ).sanitized()
-        self._set_prep_crop_preserving_source_masks(crop)
+        self._set_prep_crop(crop)
         self._schedule_prep_recompute(delay_ms=160)
 
     def _on_prep_reset_crop(self) -> None:
@@ -2285,7 +2238,7 @@ class MainWindow(QMainWindow):
         self._prep_crop_controls_syncing = False
         self.btn_prep_edit_crop.setChecked(True)
         reset_seed = ImagePrepCrop(enabled=True, center_x=0.5, center_y=0.5)
-        self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(reset_seed))
+        self._set_prep_crop(self._crop_from_zoom_control(reset_seed))
         self._sync_prep_crop_controls_from_state()
         self._on_prep_settings_changed()
 
@@ -2306,7 +2259,7 @@ class MainWindow(QMainWindow):
         current = self.image_prep_state.settings.crop.sanitized()
         if reset_center:
             current = replace(current, center_x=0.5, center_y=0.5).sanitized()
-        self._set_prep_crop_preserving_source_masks(self._crop_from_zoom_control(current))
+        self._set_prep_crop(self._crop_from_zoom_control(current))
         return True
 
     def _on_prep_fit_crop_to_output_aspect(self) -> None:
