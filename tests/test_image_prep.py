@@ -7,6 +7,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from plottrbot.core.image_prep import (
+    ImagePrepCrop,
     ImagePrepMask,
     ImagePrepSettings,
     parse_threshold_text,
@@ -86,6 +87,7 @@ def test_sidecar_roundtrip_and_deterministic_output_paths(tmp_path: Path) -> Non
         auto_thresholds=False,
         manual_thresholds=[40, 90, 150, 220],
         show_halftone_preview=True,
+        crop=ImagePrepCrop(enabled=True, center_x=0.4, center_y=0.6, width=0.7, height=0.8),
         local_masks=[
             ImagePrepMask(
                 center_x=0.25,
@@ -159,6 +161,31 @@ def test_legacy_radius_mask_migrates_to_rounded_square() -> None:
     assert mask.height == pytest.approx(0.5)
     assert mask.roundness_percent == 100
     assert mask.rotation_degrees == pytest.approx(0.0)
+
+
+def test_source_crop_changes_processed_content_and_keeps_source_preview(tmp_path: Path) -> None:
+    image_path = tmp_path / "cropped.jpg"
+    _create_gradient_jpg(image_path, width=120, height=80)
+
+    base_settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+    )
+    crop_settings = ImagePrepSettings(
+        dpi=40,
+        target_width_mm=40.0,
+        target_height_mm=40.0,
+        crop=ImagePrepCrop(enabled=True, center_x=0.25, center_y=0.5, width=0.45, height=1.0),
+    )
+
+    _, base_artifacts = process_image_for_prep(image_path=image_path, settings=base_settings)
+    sanitized, cropped_artifacts = process_image_for_prep(image_path=image_path, settings=crop_settings)
+
+    assert sanitized.crop.enabled is True
+    assert cropped_artifacts.source_preview_image.size == (120, 80)
+    assert cropped_artifacts.tonal_preview_image.size == base_artifacts.tonal_preview_image.size
+    assert cropped_artifacts.tonal_preview_image.tobytes() != base_artifacts.tonal_preview_image.tobytes()
 
 
 def test_local_mask_adjustment_changes_only_masked_region(tmp_path: Path) -> None:

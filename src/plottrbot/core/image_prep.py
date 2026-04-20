@@ -153,6 +153,52 @@ def is_supported_source_image(image_path: Path) -> bool:
     return image_path.suffix.lower() in {".jpg", ".jpeg"}
 
 
+def _clamp_center_for_span(center: float, span: float) -> float:
+    half = span / 2.0
+    if half >= 0.5:
+        return 0.5
+    return _clamp_float(center, half, 1.0 - half)
+
+
+@dataclass(slots=True)
+class ImagePrepCrop:
+    enabled: bool = False
+    center_x: float = 0.5
+    center_y: float = 0.5
+    width: float = 1.0
+    height: float = 1.0
+
+    def sanitized(self) -> ImagePrepCrop:
+        width = _clamp_float(self.width, 0.01, 1.0)
+        height = _clamp_float(self.height, 0.01, 1.0)
+        return ImagePrepCrop(
+            enabled=bool(self.enabled),
+            center_x=_clamp_center_for_span(self.center_x, width),
+            center_y=_clamp_center_for_span(self.center_y, height),
+            width=width,
+            height=height,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "center_x": float(self.center_x),
+            "center_y": float(self.center_y),
+            "width": float(self.width),
+            "height": float(self.height),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ImagePrepCrop:
+        return cls(
+            enabled=_coerce_bool(payload.get("enabled"), False),
+            center_x=_coerce_float(payload.get("center_x"), 0.5),
+            center_y=_coerce_float(payload.get("center_y"), 0.5),
+            width=_coerce_float(payload.get("width"), 1.0),
+            height=_coerce_float(payload.get("height"), 1.0),
+        ).sanitized()
+
+
 @dataclass(slots=True)
 class ImagePrepMask:
     center_x: float = 0.5
@@ -238,6 +284,7 @@ class ImagePrepSettings:
     auto_thresholds: bool = True
     manual_thresholds: list[int] = field(default_factory=list)
     show_halftone_preview: bool = False
+    crop: ImagePrepCrop = field(default_factory=ImagePrepCrop)
     local_masks: list[ImagePrepMask] = field(default_factory=list)
 
     def sanitized(self) -> ImagePrepSettings:
@@ -256,6 +303,7 @@ class ImagePrepSettings:
         blur_radius = max(0.0, float(self.blur_radius))
         auto_thresholds = bool(self.auto_thresholds)
         manual_thresholds = normalize_thresholds(self.manual_thresholds, levels=levels)
+        crop = self.crop.sanitized()
         local_masks = [mask.sanitized() for mask in self.local_masks]
         return ImagePrepSettings(
             dpi=dpi,
@@ -269,6 +317,7 @@ class ImagePrepSettings:
             auto_thresholds=auto_thresholds,
             manual_thresholds=manual_thresholds,
             show_halftone_preview=bool(self.show_halftone_preview),
+            crop=crop,
             local_masks=local_masks,
         )
 
@@ -291,6 +340,7 @@ class ImagePrepSettings:
             "auto_thresholds": bool(self.auto_thresholds),
             "manual_thresholds": [int(value) for value in self.manual_thresholds],
             "show_halftone_preview": bool(self.show_halftone_preview),
+            "crop": self.crop.sanitized().to_dict(),
             "local_masks": [mask.sanitized().to_dict() for mask in self.local_masks],
         }
 
@@ -304,6 +354,8 @@ class ImagePrepSettings:
             for raw_mask in raw_masks:
                 if isinstance(raw_mask, dict):
                     masks.append(ImagePrepMask.from_dict(raw_mask))
+        raw_crop = payload.get("crop", {})
+        crop = ImagePrepCrop.from_dict(raw_crop) if isinstance(raw_crop, dict) else ImagePrepCrop()
 
         settings = cls(
             dpi=max(1, _coerce_int(payload.get("dpi"), 35)),
@@ -327,6 +379,7 @@ class ImagePrepSettings:
                 _coerce_int(value, 0) for value in payload.get("manual_thresholds", []) if value is not None
             ],
             show_halftone_preview=_coerce_bool(payload.get("show_halftone_preview"), False),
+            crop=crop,
             local_masks=masks,
         )
         return settings.sanitized()
@@ -334,6 +387,7 @@ class ImagePrepSettings:
 
 @dataclass(slots=True, frozen=True)
 class ImagePrepArtifacts:
+    source_preview_image: Image.Image
     tonal_preview_image: Image.Image
     halftone_preview_image: Image.Image
     export_bmp_image: Image.Image
@@ -446,6 +500,23 @@ def _local_mask_image(
     return mask
 
 
+def _crop_source_image(image: Image.Image, crop: ImagePrepCrop) -> Image.Image:
+    sanitized = crop.sanitized()
+    if not sanitized.enabled:
+        return image
+
+    width, height = image.size
+    crop_width = max(1, int(round(sanitized.width * width)))
+    crop_height = max(1, int(round(sanitized.height * height)))
+    center_x = sanitized.center_x * width
+    center_y = sanitized.center_y * height
+    left = int(round(center_x - (crop_width / 2.0)))
+    top = int(round(center_y - (crop_height / 2.0)))
+    left = max(0, min(width - crop_width, left))
+    top = max(0, min(height - crop_height, top))
+    return image.crop((left, top, left + crop_width, top + crop_height))
+
+
 def _adjust_grayscale(
     image: Image.Image,
     *,
@@ -512,7 +583,8 @@ def process_image_for_prep(
     thresholds = sanitized.effective_thresholds()
 
     with Image.open(image_path) as source:
-        raw_grayscale = source.convert("L")
+        source_preview = source.convert("L")
+        raw_grayscale = _crop_source_image(source_preview, sanitized.crop)
         grayscale = _adjust_grayscale(
             raw_grayscale,
             exposure_percent=sanitized.exposure_percent,
@@ -584,6 +656,7 @@ def process_image_for_prep(
         sanitized.manual_thresholds = list(thresholds)
 
     artifacts = ImagePrepArtifacts(
+        source_preview_image=source_preview,
         tonal_preview_image=tonal_preview,
         halftone_preview_image=halftone_preview,
         export_bmp_image=export_bmp,

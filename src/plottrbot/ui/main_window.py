@@ -36,6 +36,7 @@ from plottrbot.config.settings import SettingsStore, default_end_gcode_lines, us
 from plottrbot.core.bmp_converter import BmpConverter
 from plottrbot.core.draw_session_logger import DrawSessionLogger
 from plottrbot.core.image_prep import (
+    ImagePrepCrop,
     ImagePrepMask,
     ImagePrepSettings,
     ImagePrepState,
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
         self._prep_threshold_spinboxes: list[QSpinBox] = []
         self._prep_slider_syncing = False
         self._prep_mask_controls_syncing = False
+        self._prep_crop_controls_syncing = False
         self._selected_prep_mask_index = -1
         self._prep_recompute_timer = QTimer(self)
         self._prep_recompute_timer.setSingleShot(True)
@@ -458,6 +460,65 @@ class MainWindow(QMainWindow):
         self.lbl_prep_effective_thresholds.setWordWrap(True)
         controls_layout.addWidget(self.lbl_prep_effective_thresholds, 9, 0, 1, 4)
         layout.addWidget(controls_group)
+
+        crop_group = QGroupBox("Crop source")
+        crop_layout = QGridLayout(crop_group)
+        crop_layout.setColumnStretch(1, 1)
+
+        self.checkbox_prep_crop_enabled = QCheckBox("Crop source")
+        crop_layout.addWidget(self.checkbox_prep_crop_enabled, 0, 0, 1, 2)
+
+        crop_mode_row = QHBoxLayout()
+        self.btn_prep_edit_crop = QPushButton("Edit crop")
+        self.btn_prep_edit_masks = QPushButton("Edit masks")
+        self.btn_prep_edit_crop.setCheckable(True)
+        self.btn_prep_edit_masks.setCheckable(True)
+        self.btn_prep_edit_masks.setChecked(True)
+        self.prep_edit_mode_buttons = QButtonGroup(self)
+        self.prep_edit_mode_buttons.setExclusive(True)
+        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_crop)
+        self.prep_edit_mode_buttons.addButton(self.btn_prep_edit_masks)
+        crop_mode_row.addWidget(self.btn_prep_edit_crop)
+        crop_mode_row.addWidget(self.btn_prep_edit_masks)
+        crop_layout.addLayout(crop_mode_row, 0, 2, 1, 2)
+
+        self.prep_crop_controls_panel = QWidget()
+        crop_controls_layout = QGridLayout(self.prep_crop_controls_panel)
+        crop_controls_layout.setContentsMargins(0, 0, 0, 0)
+        crop_controls_layout.setColumnStretch(1, 1)
+
+        self.slider_prep_crop_width = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_crop_width.setRange(1, 100)
+        self.lbl_prep_crop_width_value = QLabel("100%")
+        self.lbl_prep_crop_width_value.setMinimumWidth(52)
+        self.lbl_prep_crop_width_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        crop_controls_layout.addWidget(QLabel("Width"), 0, 0)
+        crop_width_row = QHBoxLayout()
+        crop_width_row.setContentsMargins(0, 0, 0, 0)
+        crop_width_row.addWidget(self.slider_prep_crop_width, 1)
+        crop_width_row.addWidget(self.lbl_prep_crop_width_value)
+        crop_controls_layout.addLayout(crop_width_row, 0, 1, 1, 3)
+
+        self.slider_prep_crop_height = QSlider(Qt.Orientation.Horizontal)
+        self.slider_prep_crop_height.setRange(1, 100)
+        self.lbl_prep_crop_height_value = QLabel("100%")
+        self.lbl_prep_crop_height_value.setMinimumWidth(52)
+        self.lbl_prep_crop_height_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        crop_controls_layout.addWidget(QLabel("Height"), 1, 0)
+        crop_height_row = QHBoxLayout()
+        crop_height_row.setContentsMargins(0, 0, 0, 0)
+        crop_height_row.addWidget(self.slider_prep_crop_height, 1)
+        crop_height_row.addWidget(self.lbl_prep_crop_height_value)
+        crop_controls_layout.addLayout(crop_height_row, 1, 1, 1, 3)
+
+        crop_actions = QHBoxLayout()
+        self.btn_prep_reset_crop = QPushButton("Reset crop")
+        self.btn_prep_fit_crop_aspect = QPushButton("Fit output aspect")
+        crop_actions.addWidget(self.btn_prep_reset_crop)
+        crop_actions.addWidget(self.btn_prep_fit_crop_aspect)
+        crop_controls_layout.addLayout(crop_actions, 2, 0, 1, 4)
+        crop_layout.addWidget(self.prep_crop_controls_panel, 1, 0, 1, 4)
+        layout.addWidget(crop_group)
 
         mask_group = QGroupBox("Local adjustments")
         mask_layout = QGridLayout(mask_group)
@@ -976,6 +1037,13 @@ class MainWindow(QMainWindow):
                 lambda _value, threshold_index=index: self._on_prep_threshold_spin_changed(threshold_index)
             )
         self.checkbox_prep_halftone_preview.toggled.connect(self._on_prep_preview_toggle_changed)
+        self.checkbox_prep_crop_enabled.toggled.connect(self._on_prep_crop_enabled_toggled)
+        self.btn_prep_edit_crop.clicked.connect(self._on_prep_edit_mode_changed)
+        self.btn_prep_edit_masks.clicked.connect(self._on_prep_edit_mode_changed)
+        self.slider_prep_crop_width.valueChanged.connect(self._on_prep_crop_controls_changed)
+        self.slider_prep_crop_height.valueChanged.connect(self._on_prep_crop_controls_changed)
+        self.btn_prep_reset_crop.clicked.connect(self._on_prep_reset_crop)
+        self.btn_prep_fit_crop_aspect.clicked.connect(self._on_prep_fit_crop_to_output_aspect)
         self.btn_prep_add_mask.clicked.connect(self._on_prep_add_mask)
         self.btn_prep_remove_mask.clicked.connect(self._on_prep_remove_mask)
         self.slider_prep_mask_width.valueChanged.connect(self._on_prep_mask_controls_changed)
@@ -988,6 +1056,7 @@ class MainWindow(QMainWindow):
         self.slider_prep_mask_blur.valueChanged.connect(self._on_prep_mask_controls_changed)
         self.prep_preview_label.maskSelected.connect(self._on_prep_mask_selected)
         self.prep_preview_label.maskMoved.connect(self._on_prep_mask_moved)
+        self.prep_preview_label.cropMoved.connect(self._on_prep_crop_moved)
 
         self.btn_select_img.clicked.connect(self._on_select_image)
         self.btn_move_img.clicked.connect(self._on_move_image)
@@ -1244,8 +1313,20 @@ class MainWindow(QMainWindow):
         )
         self.prep_preview_label.setPixmap(fitted)
         self.prep_preview_label.resize(fitted.size())
+        self._sync_prep_preview_overlays()
+
+    def _prep_crop_edit_active(self) -> bool:
+        return self.image_prep_state.settings.crop.enabled and self.btn_prep_edit_crop.isChecked()
+
+    def _sync_prep_preview_overlays(self) -> None:
+        settings = self.image_prep_state.settings.sanitized()
+        if self._prep_crop_edit_active():
+            self.prep_preview_label.set_crop(settings.crop, edit_enabled=True)
+            self.prep_preview_label.set_masks([], -1)
+            return
+        self.prep_preview_label.clear_crop()
         self.prep_preview_label.set_masks(
-            self.image_prep_state.settings.local_masks,
+            settings.local_masks,
             self._selected_prep_mask_index,
         )
 
@@ -1284,6 +1365,7 @@ class MainWindow(QMainWindow):
         self._prep_slider_syncing = False
         self._set_manual_threshold_controls_visible(not settings.auto_thresholds)
         self._prep_updating_controls = False
+        self._sync_prep_crop_controls_from_state()
         self._sync_prep_mask_controls_from_state()
         self._update_prep_status_labels()
         self._render_prep_preview()
@@ -1307,9 +1389,37 @@ class MainWindow(QMainWindow):
             auto_thresholds=auto_thresholds,
             manual_thresholds=manual_thresholds,
             show_halftone_preview=self.checkbox_prep_halftone_preview.isChecked(),
+            crop=self._read_prep_crop_from_controls(),
             local_masks=[mask.sanitized() for mask in self.image_prep_state.settings.local_masks],
         )
         return settings.sanitized()
+
+    def _read_prep_crop_from_controls(self) -> ImagePrepCrop:
+        current = self.image_prep_state.settings.crop.sanitized()
+        return ImagePrepCrop(
+            enabled=self.checkbox_prep_crop_enabled.isChecked(),
+            center_x=current.center_x,
+            center_y=current.center_y,
+            width=float(self.slider_prep_crop_width.value()) / 100.0,
+            height=float(self.slider_prep_crop_height.value()) / 100.0,
+        ).sanitized()
+
+    def _sync_prep_crop_controls_from_state(self) -> None:
+        crop = self.image_prep_state.settings.crop.sanitized()
+        self.image_prep_state.settings.crop = crop
+        self._prep_crop_controls_syncing = True
+        self.checkbox_prep_crop_enabled.setChecked(crop.enabled)
+        self.prep_crop_controls_panel.setVisible(crop.enabled)
+        self.slider_prep_crop_width.setValue(int(round(crop.width * 100.0)))
+        self.slider_prep_crop_height.setValue(int(round(crop.height * 100.0)))
+        if not crop.enabled:
+            self.btn_prep_edit_masks.setChecked(True)
+        self._update_prep_crop_value_labels()
+        self._prep_crop_controls_syncing = False
+
+    def _update_prep_crop_value_labels(self) -> None:
+        self.lbl_prep_crop_width_value.setText(f"{self.slider_prep_crop_width.value()}%")
+        self.lbl_prep_crop_height_value.setText(f"{self.slider_prep_crop_height.value()}%")
 
     def _selected_prep_mask(self) -> ImagePrepMask | None:
         masks = self.image_prep_state.settings.local_masks
@@ -1441,26 +1551,28 @@ class MainWindow(QMainWindow):
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Load a JPG to begin.")
             self.prep_preview_label.clear_masks()
+            self.prep_preview_label.clear_crop()
             return
 
-        preview_image = (
-            artifacts.halftone_preview_image
-            if self.image_prep_state.settings.show_halftone_preview
-            else artifacts.tonal_preview_image
-        )
+        if self._prep_crop_edit_active():
+            preview_image = artifacts.source_preview_image
+        else:
+            preview_image = (
+                artifacts.halftone_preview_image
+                if self.image_prep_state.settings.show_halftone_preview
+                else artifacts.tonal_preview_image
+            )
         pixmap = self._pil_image_to_pixmap(preview_image)
         if pixmap.isNull():
             self._prep_preview_full_pixmap = QPixmap()
             self.prep_preview_label.setPixmap(QPixmap())
             self.prep_preview_label.setText("Preview unavailable.")
             self.prep_preview_label.clear_masks()
+            self.prep_preview_label.clear_crop()
             return
         self._prep_preview_full_pixmap = pixmap
         self.prep_preview_label.setText("")
-        self.prep_preview_label.set_masks(
-            self.image_prep_state.settings.local_masks,
-            self._selected_prep_mask_index,
-        )
+        self._sync_prep_preview_overlays()
         self._update_prep_preview_fit()
 
     def _recompute_prep_artifacts(self, *, mark_dirty: bool) -> bool:
@@ -1971,6 +2083,75 @@ class MainWindow(QMainWindow):
         self.image_prep_state.settings.show_halftone_preview = checked
         self._render_prep_preview()
 
+    def _on_prep_crop_enabled_toggled(self, checked: bool) -> None:
+        if self._prep_updating_controls or self._prep_crop_controls_syncing:
+            return
+        if checked:
+            self.btn_prep_edit_crop.setChecked(True)
+        else:
+            self.btn_prep_edit_masks.setChecked(True)
+        self.prep_crop_controls_panel.setVisible(checked)
+        current = self.image_prep_state.settings.crop.sanitized()
+        self.image_prep_state.settings.crop = replace(current, enabled=checked).sanitized()
+        self._on_prep_settings_changed()
+
+    def _on_prep_edit_mode_changed(self, *_args: object) -> None:
+        if self._prep_updating_controls or self._prep_crop_controls_syncing:
+            return
+        self._render_prep_preview()
+
+    def _on_prep_crop_controls_changed(self, *_args: object) -> None:
+        self._update_prep_crop_value_labels()
+        if self._prep_updating_controls or self._prep_crop_controls_syncing:
+            return
+        self.image_prep_state.settings.crop = self._read_prep_crop_from_controls()
+        self._schedule_prep_recompute(delay_ms=90)
+
+    def _on_prep_crop_moved(self, center_x: float, center_y: float) -> None:
+        if self._prep_updating_controls or self._prep_crop_controls_syncing:
+            return
+        crop = replace(
+            self.image_prep_state.settings.crop,
+            center_x=float(center_x),
+            center_y=float(center_y),
+        ).sanitized()
+        self.image_prep_state.settings.crop = crop
+        self._schedule_prep_recompute(delay_ms=160)
+
+    def _on_prep_reset_crop(self) -> None:
+        if self._prep_updating_controls:
+            return
+        self.image_prep_state.settings.crop = ImagePrepCrop(enabled=True).sanitized()
+        self.btn_prep_edit_crop.setChecked(True)
+        self._sync_prep_crop_controls_from_state()
+        self._on_prep_settings_changed()
+
+    def _on_prep_fit_crop_to_output_aspect(self) -> None:
+        artifacts = self.image_prep_state.artifacts
+        if artifacts is None:
+            return
+        target_width = max(1e-9, float(self.spin_prep_width_mm.value()))
+        target_height = max(1e-9, float(self.spin_prep_height_mm.value()))
+        target_aspect = target_width / target_height
+        source_width, source_height = artifacts.source_preview_image.size
+        source_aspect = max(1e-9, source_width / max(source_height, 1))
+        if target_aspect >= source_aspect:
+            crop_width = 1.0
+            crop_height = source_aspect / target_aspect
+        else:
+            crop_width = target_aspect / source_aspect
+            crop_height = 1.0
+        self.image_prep_state.settings.crop = ImagePrepCrop(
+            enabled=True,
+            center_x=0.5,
+            center_y=0.5,
+            width=crop_width,
+            height=crop_height,
+        ).sanitized()
+        self.btn_prep_edit_crop.setChecked(True)
+        self._sync_prep_crop_controls_from_state()
+        self._on_prep_settings_changed()
+
     def _on_prep_add_mask(self) -> None:
         if self.image_prep_state.source_image_path is None:
             QMessageBox.information(self, "No image", "Open a JPG image before adding a local mask.")
@@ -1993,6 +2174,7 @@ class MainWindow(QMainWindow):
         )
         self.image_prep_state.settings = settings
         self._selected_prep_mask_index = len(settings.local_masks) - 1
+        self.btn_prep_edit_masks.setChecked(True)
         self._sync_prep_mask_controls_from_state()
         self._on_prep_settings_changed()
 
@@ -2939,6 +3121,14 @@ class MainWindow(QMainWindow):
         self.btn_prep_save_outputs.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_apply_to_control.setEnabled(prep_has_artifacts and prep_controls_enabled)
         self.btn_prep_reset_defaults.setEnabled(prep_controls_enabled)
+        prep_crop_enabled = prep_has_source and self.image_prep_state.settings.crop.enabled
+        self.checkbox_prep_crop_enabled.setEnabled(prep_has_source and prep_controls_enabled)
+        self.btn_prep_edit_crop.setEnabled(prep_crop_enabled and prep_controls_enabled)
+        self.btn_prep_edit_masks.setEnabled(prep_has_source and prep_controls_enabled)
+        self.slider_prep_crop_width.setEnabled(prep_crop_enabled and prep_controls_enabled)
+        self.slider_prep_crop_height.setEnabled(prep_crop_enabled and prep_controls_enabled)
+        self.btn_prep_reset_crop.setEnabled(prep_crop_enabled and prep_controls_enabled)
+        self.btn_prep_fit_crop_aspect.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_add_mask.setEnabled(prep_has_source and prep_controls_enabled)
         self.btn_prep_remove_mask.setEnabled(prep_has_selected_mask and prep_controls_enabled)
         self.slider_prep_mask_width.setEnabled(prep_has_selected_mask and prep_controls_enabled)

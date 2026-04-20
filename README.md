@@ -55,10 +55,12 @@ Dummy serial mode shows a `DUMMY-PLOTTRBOT` port in `Run`, acknowledges every no
   - target width/height in mm
   - exposure
   - Gaussian blur
+  - source crop window
   - tonal levels (`2-8`)
   - threshold strategy (`banded` or `relative`)
   - auto/manual thresholds
 - Preview can toggle between tonal and halftone views.
+- `Crop source` can crop the loaded JPG before prep resizing; use `Edit crop` to drag the crop window, and `Edit masks` to return to local mask editing.
 - `Local adjustments` can add rectangular masks that override exposure, contrast, and blur in selected image regions. Drag a mask in the prep preview to reposition it, then tune width, height, roundness, rotation, feathering, and image adjustments with sliders.
 - `Export BMP + sidecar` writes deterministic files next to the source JPG:
   - `<image-stem>.plottrbot.processed.bmp`

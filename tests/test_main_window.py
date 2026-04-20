@@ -1170,6 +1170,56 @@ def test_image_prep_sliders_and_manual_threshold_rows(qtbot, settings_store, tmp
     assert window.spin_prep_blur.maximum() == pytest.approx(10.0, abs=0.01)
 
 
+def test_image_prep_crop_controls_update_settings_and_sidecar(qtbot, settings_store, tmp_path: Path) -> None:
+    window = MainWindow(
+        settings_store=settings_store,
+        transport=FakeTransport(),
+        streamer=FakeStreamer(),
+        sleep_inhibitor=FakeSleepInhibitor(),
+    )
+    qtbot.addWidget(window)
+
+    jpg_path = tmp_path / "crop.jpg"
+    _create_rect_jpg(jpg_path, width=80, height=40)
+    assert window._load_prep_source_image(
+        jpg_path,
+        settings=ImagePrepSettings(dpi=35, target_width_mm=200.0, target_height_mm=200.0),
+        mark_dirty=True,
+    )
+    assert window.prep_crop_controls_panel.isHidden() is True
+
+    window.checkbox_prep_crop_enabled.setChecked(True)
+    assert window.prep_crop_controls_panel.isHidden() is False
+    assert window.btn_prep_edit_crop.isChecked() is True
+
+    window.slider_prep_crop_width.setValue(50)
+    window.slider_prep_crop_height.setValue(75)
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01), timeout=1500)
+    assert window.image_prep_state.settings.crop.enabled is True
+    assert window.image_prep_state.settings.crop.height == pytest.approx(0.75, abs=0.01)
+    assert window.lbl_prep_crop_width_value.text() == "50%"
+    assert window.lbl_prep_crop_height_value.text() == "75%"
+
+    window._on_prep_crop_moved(0.25, 0.75)
+    qtbot.waitUntil(lambda: window.image_prep_state.settings.crop.center_x == pytest.approx(0.25, abs=0.01), timeout=1500)
+    assert window.image_prep_state.settings.crop.center_y == pytest.approx(0.625, abs=0.01)
+
+    window._on_prep_fit_crop_to_output_aspect()
+    assert window.image_prep_state.settings.crop.width == pytest.approx(0.5, abs=0.01)
+    assert window.image_prep_state.settings.crop.height == pytest.approx(1.0, abs=0.01)
+
+    sidecar_path = window._save_prep_sidecar()
+    assert sidecar_path is not None
+    _, loaded_settings, _ = read_sidecar(sidecar_path)
+    assert loaded_settings.crop.enabled is True
+    assert loaded_settings.crop.width == pytest.approx(0.5, abs=0.01)
+    assert loaded_settings.crop.height == pytest.approx(1.0, abs=0.01)
+
+    window.checkbox_prep_crop_enabled.setChecked(False)
+    assert window.prep_crop_controls_panel.isHidden() is True
+    assert window.btn_prep_edit_masks.isChecked() is True
+
+
 def test_image_prep_local_mask_controls_update_settings_and_sidecar(
     qtbot, settings_store, tmp_path: Path
 ) -> None:
